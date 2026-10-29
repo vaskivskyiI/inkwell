@@ -1,0 +1,14 @@
+{
+  "name": "inkwell",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Self-hostable, AI-native notes: rich text and handwriting, real-time collaboration, shared spaces",
+  "workspaces": ["server", "web"],
+  "scripts": {
+    "build": "npm run build -w web",
+    "start": "npm start -w server",
+    "dev": "npm run dev -w server & npm run dev -w web",
+    "test": "npm test -w server"
+  },
+  "engines": { "node": ">=22" }
+}

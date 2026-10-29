@@ -1,0 +1,30 @@
+{
+  "name": "inkwell-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test --test-concurrency=1 test/"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.13",
+    "@electric-sql/pglite-pgvector": "^0.0.14",
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/multipart": "^10.1.6",
+    "@fastify/static": "^10.1.8",
+    "@fastify/websocket": "^11.3.4",
+    "@hocuspocus/server": "^4.8.0",
+    "@resvg/resvg-js": "^2.6.2",
+    "fastify": "^5.12.7",
+    "perfect-freehand": "^1.2.3",
+    "pg": "^8.23.1",
+    "ws": "^8.22.0",
+    "yjs": "^13.6.33"
+  },
+  "devDependencies": {
+    "@hocuspocus/provider": "^4.8.0"
+  }
+}

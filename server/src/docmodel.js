@@ -1,0 +1,294 @@
+// The page document (one Y.Doc per page) and what the server derives from it without an editor schema:
+//   title   Y.Text        — page title
+//   default Y.XmlFragment — rich-text body as y-prosemirror writes it (elements named by node type, marks as text attributes)
+//   ink     Y.Map         — canvasId → Y.Array of strokes { id, t: 'pen'|'hl', c, w, p: [x, y, pressure, …], by }
+//   boxes   Y.Map         — journal text boxes: boxId → Y.Map { x, y, w, text: Y.Text }
+//   meta    Y.Map         — paper style etc.
+import * as Y from 'yjs';
+import { sha256 } from './util/crypto.js';
+
+export const docFrom = (bytes) => {
+  const d = new Y.Doc();
+  if (bytes?.length) Y.applyUpdate(d, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+  return d;
+};
+
+// ---------- reading
+
+const MARK_WRAP = { bold: '**', italic: '_', strike: '~~', code: '`' };
+
+function inlineMd(el, ctx) {
+  let out = '';
+  for (const c of el.toArray()) {
+    if (c instanceof Y.XmlText) {
+      for (const op of c.toDelta()) {
+        if (typeof op.insert !== 'string') continue;
+        let s = op.insert;
+        const a = op.attributes || {};
+        if (ctx.plain) { out += s; continue; }
+        for (const [m, w] of Object.entries(MARK_WRAP)) if (a[m] && s.trim()) s = s.replace(/^(\s*)(.*?)(\s*)$/s, `$1${w}$2${w}$3`);
+        if (a.link?.href) s = `[${s}](${a.link.href})`;
+        if (a.highlight && s.trim()) s = `==${s}==`;
+        out += s;
+      }
+    } else if (c instanceof Y.XmlElement) {
+      const n = c.nodeName;
+      if (n === 'hardBreak') out += ctx.plain ? '\n' : '  \n';
+      else if (n === 'pageMention') { out += ctx.plain ? c.getAttribute('title') || '' : `[[${c.getAttribute('title') || ''}]]`; ctx.mentions?.add(c.getAttribute('id')); }
+      else if (n === 'image') out += imageMd(c, ctx);
+      else out += inlineMd(c, ctx);
+    }
+  }
+  return out;
+}
+
+function imageMd(el, ctx) {
+  const src = el.getAttribute('src') || '';
+  const m = /\/api\/assets\/([0-9a-f-]{36})/.exec(src);
+  if (m) ctx.assets?.add(m[1]);
+  const described = m && ctx.assetText?.(m[1]);
+  if (ctx.plain) return described ? `[image: ${described}]` : '';
+  return `![${el.getAttribute('alt') || ''}](${src})${described ? `\n_(image: ${described})_` : ''}`;
+}
+
+const prefixLines = (s, first, rest = ' '.repeat(first.length)) => s.split('\n').map((l, i) => (i ? rest : first) + l).join('\n');
+
+function blocksMd(parent, ctx) {
+  return parent.toArray().map((c) => blockMd(c, ctx)).filter((s) => s !== null && s !== '').join('\n\n');
+}
+
+function blockMd(el, ctx) {
+  if (el instanceof Y.XmlText) return inlineMd({ toArray: () => [el] }, ctx);
+  const n = el.nodeName;
+  switch (n) {
+    case 'paragraph': return inlineMd(el, ctx);
+    case 'heading': return ctx.plain ? inlineMd(el, ctx) : `${'#'.repeat(Number(el.getAttribute('level')) || 1)} ${inlineMd(el, ctx)}`;
+    case 'blockquote': return prefixLines(blocksMd(el, ctx), ctx.plain ? '' : '> ', ctx.plain ? '' : '> ');
+    case 'callout': return prefixLines(blocksMd(el, ctx), ctx.plain ? '' : `> ${el.getAttribute('emoji') || '💡'} `, ctx.plain ? '' : '> ');
+    case 'bulletList': case 'orderedList': case 'taskList':
+      return el.toArray().map((item, i) => {
+        const mark = n === 'orderedList' ? `${i + 1}. ` : n === 'taskList' ? `- [${item.getAttribute?.('checked') ? 'x' : ' '}] ` : '- ';
+        const body = item.toArray ? item.toArray().map((b) => blockMd(b, ctx)).filter(Boolean).join('\n') : '';
+        return prefixLines(body, ctx.plain && n !== 'taskList' ? '• ' : mark);
+      }).join('\n');
+    case 'listItem': case 'taskItem': return blocksMd(el, ctx);
+    case 'codeBlock': {
+      const code = el.toArray().map((t) => t.toString()).join('');
+      return ctx.plain ? code : `\`\`\`${el.getAttribute('language') || ''}\n${code}\n\`\`\``;
+    }
+    case 'horizontalRule': return ctx.plain ? '' : '---';
+    case 'image': return imageMd(el, ctx);
+    case 'table': {
+      const rows = el.toArray().map((r) => r.toArray().map((cell) => blocksMd(cell, { ...ctx, plain: ctx.plain }).replace(/\n+/g, ' ').replace(/\|/g, '\\|')));
+      if (!rows.length) return '';
+      if (ctx.plain) return rows.map((r) => r.join(' · ')).join('\n');
+      const w = Math.max(...rows.map((r) => r.length));
+      const line = (r) => `| ${Array.from({ length: w }, (_, i) => r[i] || '').join(' | ')} |`;
+      return [line(rows[0]), `|${' --- |'.repeat(w)}`, ...rows.slice(1).map(line)].join('\n');
+    }
+    case 'inkBlock': {
+      const id = el.getAttribute('id');
+      ctx.inkIds?.add(id);
+      const t = ctx.ink?.(id);
+      return t ? (ctx.plain ? t : `✍️ *(handwritten)*\n${prefixLines(t, '> ', '> ')}`) : (ctx.plain ? '' : '✍️ *(handwriting — not transcribed yet)*');
+    }
+    default: return el.toArray ? blocksMd(el, ctx) : '';
+  }
+}
+
+export function strokesOf(ydoc, canvasId) {
+  const arr = ydoc.getMap('ink').get(canvasId);
+  return arr instanceof Y.Array ? arr.toArray() : [];
+}
+
+export const strokesHash = (strokes) => sha256(strokes.map((s) => s.id).join(','));
+
+/**
+ * Everything the server needs from a page: title, Markdown (for AI/export), plain text (search), ink canvases,
+ * referenced assets and mentioned pages. `recognitions` maps canvasId → transcription; `assetText` describes images.
+ */
+export function extract(ydoc, { recognitions = {}, assetText } = {}) {
+  const title = ydoc.getText('title').toString().trim();
+  const frag = ydoc.getXmlFragment('default');
+  const ctxBase = { ink: (id) => recognitions[id], assetText, inkIds: new Set(), assets: new Set(), mentions: new Set() };
+  const markdown = blocksMd(frag, ctxBase);
+  const text = blocksMd(frag, { ...ctxBase, plain: true, inkIds: null, assets: null, mentions: null });
+  const boxes = [...ydoc.getMap('boxes').values()].map((b) => (b instanceof Y.Map ? String(b.get('text') || '') : '')).filter(Boolean);
+  const inkMap = ydoc.getMap('ink');
+  const canvases = [...inkMap.keys()].map((id) => {
+    const strokes = strokesOf(ydoc, id);
+    return { id, strokes, hash: strokesHash(strokes) };
+  }).filter((c) => c.strokes.length && (c.id === 'page' || ctxBase.inkIds.has(c.id)));
+  const pageInk = recognitions.page ? `✍️ *(handwritten page)*\n${recognitions.page}` : '';
+  const fullMd = [markdown, boxes.join('\n\n'), pageInk].filter(Boolean).join('\n\n');
+  const fullText = [text, boxes.join('\n'), recognitions.page || ''].filter(Boolean).join('\n');
+  const tags = [...new Set([...fullText.matchAll(/(?:^|\s)#([\p{L}\p{N}_-]{2,40})/gu)].map((m) => m[1].toLowerCase()))];
+  return {
+    title, markdown: fullMd, text: fullText, tags, canvases,
+    assets: [...ctxBase.assets], mentions: [...ctxBase.mentions].filter(Boolean),
+    hash: sha256(`${title}\n${fullMd}\n${canvases.map((c) => c.hash).join(',')}`),
+  };
+}
+
+// ---------- writing
+
+function textNode(runs) {
+  const t = new Y.XmlText();
+  let pos = 0;
+  for (const r of runs) {
+    const attrs = {};
+    for (const m of r.marks || []) attrs[m.type] = m.attrs || {};
+    t.insert(pos, r.text, attrs);
+    pos += r.text.length;
+  }
+  return t;
+}
+
+function toY(node) {
+  const el = new Y.XmlElement(node.type);
+  for (const [k, v] of Object.entries(node.attrs || {})) if (v !== undefined) el.setAttribute(k, v);
+  const kids = [];
+  let runs = [];
+  for (const c of node.content || []) {
+    if (c.type === 'text') { if (c.text) runs.push(c); continue; }
+    if (runs.length) { kids.push(textNode(runs)); runs = []; }
+    kids.push(toY(c));
+  }
+  if (runs.length) kids.push(textNode(runs));
+  if (kids.length) el.insert(0, kids);
+  return el;
+}
+
+/** Appends ProseMirror-JSON blocks to the page body. */
+export function appendBlocks(ydoc, blocks, origin) {
+  ydoc.transact(() => {
+    const frag = ydoc.getXmlFragment('default');
+    frag.insert(frag.length, blocks.map(toY));
+  }, origin);
+}
+
+export function setTitle(ydoc, title, origin) {
+  const t = ydoc.getText('title');
+  if (t.toString() === title) return;
+  ydoc.transact(() => { t.delete(0, t.length); t.insert(0, title); }, origin);
+}
+
+export function buildDoc({ title = '', blocks = [], paper } = {}) {
+  const d = new Y.Doc();
+  if (title) d.getText('title').insert(0, title);
+  if (blocks.length) appendBlocks(d, blocks);
+  if (paper) d.getMap('meta').set('paper', paper);
+  return d;
+}
+
+export const encode = (ydoc) => Y.encodeStateAsUpdate(ydoc);
+
+// ---------- Markdown → ProseMirror JSON (import, templates, AI output)
+
+function inlineFromMd(s) {
+  const out = [];
+  const re = /(\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\s][^*]*)\*|_([^_\s][^_]*)_|`([^`]+)`|~~([^~]+)~~|==([^=]+)==|\[\[([^\]]+)\]\]|\[([^\]]+)\]\(([^)\s]+)\))/g;
+  let last = 0, m;
+  const push = (text, marks) => { if (text) out.push(marks?.length ? { type: 'text', text, marks } : { type: 'text', text }); };
+  while ((m = re.exec(s))) {
+    push(s.slice(last, m.index));
+    if (m[2] || m[3]) push(m[2] || m[3], [{ type: 'bold' }]);
+    else if (m[4] || m[5]) push(m[4] || m[5], [{ type: 'italic' }]);
+    else if (m[6]) push(m[6], [{ type: 'code' }]);
+    else if (m[7]) push(m[7], [{ type: 'strike' }]);
+    else if (m[8]) push(m[8], [{ type: 'highlight' }]);
+    else if (m[9]) push(`[[${m[9]}]]`);
+    else if (m[10]) push(m[10], [{ type: 'link', attrs: { href: m[11] } }]);
+    last = re.lastIndex;
+  }
+  push(s.slice(last));
+  return out;
+}
+
+const para = (text) => ({ type: 'paragraph', content: inlineFromMd(text) });
+
+export function markdownToBlocks(md) {
+  const lines = String(md || '').replace(/\r\n?/g, '\n').split('\n');
+  const blocks = [];
+  let i = 0;
+  const isList = (l) => /^\s*([-*+]|\d+[.)])\s+/.test(l);
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+    let m;
+    if ((m = /^```\s*([\w+-]*)/.exec(line))) {
+      const code = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]);
+      i++;
+      blocks.push({ type: 'codeBlock', attrs: { language: m[1] || null }, content: code.length ? [{ type: 'text', text: code.join('\n') }] : [] });
+    } else if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) {
+      blocks.push({ type: 'heading', attrs: { level: Math.min(m[1].length, 3) }, content: inlineFromMd(m[2]) });
+      i++;
+    } else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      blocks.push({ type: 'horizontalRule' });
+      i++;
+    } else if ((m = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/.exec(line))) {
+      blocks.push({ type: 'image', attrs: { src: m[2], alt: m[1] } });
+      i++;
+    } else if (/^\s*>/.test(line)) {
+      const q = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\s*>\s?/, ''));
+      blocks.push({ type: 'blockquote', content: markdownToBlocks(q.join('\n')) });
+    } else if (/^\s*\|.*\|\s*$/.test(line)) {
+      const rows = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(lines[i++]);
+      const cells = rows.filter((r) => !/^\s*\|(\s*:?-+:?\s*\|)+\s*$/.test(r))
+        .map((r) => r.trim().replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|')));
+      blocks.push({ type: 'table', content: cells.map((r, ri) => ({ type: 'tableRow', content: r.map((c) => ({ type: ri ? 'tableCell' : 'tableHeader', content: [para(c)] })) })) });
+    } else if (isList(line)) {
+      const { block, next } = parseList(lines, i);
+      blocks.push(block);
+      i = next;
+    } else {
+      const p = [];
+      while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|```|\s*>|\s*\|)/.test(lines[i]) && !isList(lines[i])) p.push(lines[i++].trim());
+      blocks.push(para(p.join(' ')));
+    }
+  }
+  return blocks;
+}
+
+function parseList(lines, start) {
+  const indentOf = (l) => /^\s*/.exec(l)[0].replace(/\t/g, '  ').length;
+  const ITEM = /^\s*([-*+]|\d+[.)])\s+(\[([ xX])\](?:\s+|$))?(.*)$/;
+  const base = indentOf(lines[start]);
+  const head = ITEM.exec(lines[start]);
+  const task = !!head[2];
+  const ordered = /^\d/.test(head[1]);
+  const items = [];
+  let i = start;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (!l.trim()) { if (i + 1 < lines.length && indentOf(lines[i + 1]) >= base && /^\s*([-*+]|\d+[.)])\s+/.test(lines[i + 1])) { i++; continue; } break; }
+    const ind = indentOf(l);
+    if (ind < base) break;
+    const m = ITEM.exec(l);
+    if (ind === base && m) {
+      // A different kind of list starts a new list block (the first line always belongs to this one).
+      if (i > start && (/^\d/.test(m[1]) !== ordered || !!m[2] !== task)) break;
+      items.push({ checked: m[3] ? m[3].toLowerCase() === 'x' : null, lines: [m[4]] });
+      i++;
+    } else if (ind > base && items.length) {
+      items[items.length - 1].lines.push(l.slice(Math.min(ind, base + 2)));
+      i++;
+    } else break;
+  }
+  const type = task ? 'taskList' : ordered ? 'orderedList' : 'bulletList';
+  return {
+    next: i,
+    block: {
+      type,
+      content: items.map((it) => ({
+        type: task ? 'taskItem' : 'listItem',
+        ...(task ? { attrs: { checked: !!it.checked } } : {}),
+        content: [para(it.lines[0]), ...markdownToBlocks(it.lines.slice(1).join('\n'))],
+      })),
+    },
+  };
+}
