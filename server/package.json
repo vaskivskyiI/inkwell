@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test --test-concurrency=1 test/"
+    "test": "node --test --test-concurrency=1 \"test/*.test.js\"",
+    "test:pg": "node test/pgwire.mjs test/api.test.js test/ai.test.js"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.13",
@@ -25,6 +26,7 @@
     "yjs": "^13.6.33"
   },
   "devDependencies": {
+    "@electric-sql/pglite-socket": "^0.2.16",
     "@hocuspocus/provider": "^4.8.0"
   }
 }

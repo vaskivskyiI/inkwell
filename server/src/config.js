@@ -17,6 +17,7 @@ export const config = {
   assetsDir: path.join(dataDir, 'assets'),
   // Postgres connection string; empty → embedded PGlite in <dataDir>/pg (or in memory when INKWELL_DATA_DIR=memory:).
   databaseUrl: env.INKWELL_DATABASE_URL || '',
+  dbPool: num(env.INKWELL_DB_POOL, 20),
   memoryDb: env.INKWELL_DB === 'memory',
   secret: env.INKWELL_SECRET || '',
   publicUrl: (env.INKWELL_PUBLIC_URL || '').replace(/\/+$/, ''),

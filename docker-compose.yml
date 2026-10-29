@@ -1,0 +1,25 @@
+# podman-compose / docker compose alternative to deploy/podman-pod.sh.
+# Create deploy/inkwell.env first (./deploy/podman-pod.sh writes a template), then: podman-compose up -d
+services:
+  db:
+    image: docker.io/pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: inkwell
+      POSTGRES_DB: inkwell
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes: [inkwell-pg:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "inkwell"], interval: 10s }
+  app:
+    build: .
+    image: localhost/inkwell:latest
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+    env_file: deploy/inkwell.env
+    environment:
+      INKWELL_DATABASE_URL: postgres://inkwell:${POSTGRES_PASSWORD}@db:5432/inkwell
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: [inkwell-data:/data]
+volumes:
+  inkwell-pg:
+  inkwell-data:

@@ -19,7 +19,7 @@ export async function openDb() {
   if (config.databaseUrl) {
     const { default: pg } = await import('pg');
     pg.types.setTypeParser(20, (v) => Number(v)); // bigint epoch-ms timestamps → numbers
-    const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 20 });
+    const pool = new pg.Pool({ connectionString: config.databaseUrl, max: config.dbPool });
     pool.on('error', (e) => log.error('pool error', e.message));
     let listener = null;
     const handlers = new Map();
@@ -38,16 +38,23 @@ export async function openDb() {
           throw e;
         } finally { client.release(); }
       },
+      // LISTEN gets its own connection outside the pool (it is held forever), reconnecting if it drops.
       async listen(channel, fn) {
-        if (!listener) {
-          listener = await pool.connect();
-          listener.on('notification', (m) => handlers.get(m.channel)?.(m.payload));
-        }
         handlers.set(channel, fn);
-        await listener.query(`LISTEN ${channel}`);
+        if (!listener) {
+          const connect = async () => {
+            const c = new pg.Client({ connectionString: config.databaseUrl });
+            c.on('notification', (m) => handlers.get(m.channel)?.(m.payload));
+            c.on('error', (e) => { log.warn('listener lost:', e.message); listener = null; setTimeout(() => connect().catch(() => {}), 2000).unref(); });
+            await c.connect();
+            for (const ch of handlers.keys()) await c.query(`LISTEN ${ch}`);
+            listener = c;
+          };
+          await connect();
+        } else await listener.query(`LISTEN ${channel}`);
       },
       notify: (channel, payload) => pool.query('SELECT pg_notify($1, $2)', [channel, payload]),
-      async close() { listener?.release(); await pool.end(); },
+      async close() { const l = listener; listener = null; l?.removeAllListeners('error'); await l?.end().catch(() => {}); await pool.end(); },
     };
   } else {
     const { PGlite } = await import('@electric-sql/pglite');
