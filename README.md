@@ -25,6 +25,7 @@ Plan, architecture and roadmap: [docs/PLAN.md](docs/PLAN.md) · project state fo
 ./deploy/podman-pod.sh up --with-ollama --gpu   # … plus local AI (pulls a chat, a vision and an embedding model)
 ./deploy/podman-pod.sh update                   # git pull, rebuild, recreate (data kept)
 ./deploy/podman-pod.sh backup                   # pg_dump + assets + env into ./backups/
+./deploy/test-on-postgres.sh                   # run the test suite against the pod's PostgreSQL (throwaway database)
 ```
 
 Open the address and create the first account (it becomes the administrator). Put nginx/Caddy with TLS in front
