@@ -12,7 +12,9 @@ Self-hostable, AI-native notes — between OneNote, Microsoft Journal, AFFiNE an
   restricted to local AI.
 - **Live co-editing on every device** (Yjs CRDT): cursors, presence, offline editing that merges on reconnect.
 - **Spaces** (Private, Work, team spaces) shared with roles; nested pages, favourites, daily journal, templates,
-  version history, trash, public read-only links, Markdown/HTML export and import.
+  version history, trash, public read-only links, Markdown/HTML export.
+- **Import** from AFFiNE (Snapshot export: structure, links, sub-pages, images, pen strokes) and from Markdown,
+  Notion or Obsidian zips — Settings → Import.
 - **Halcyon integration**: link pages to e-mails, calendar events, tasks and people; meeting notes from today's
   events; action items → Halcyon tasks.
 

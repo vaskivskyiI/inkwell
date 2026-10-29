@@ -16,6 +16,7 @@ import searchRoutes from './search.js';
 import aiRoutes from './routes/ai.js';
 import linkRoutes from './links.js';
 import halcyonRoutes from './integrations/halcyon.js';
+import importRoutes from './importers/index.js';
 import { handleSocket, stopCollab } from './collab.js';
 import { initEvents, addClient } from './events.js';
 import { startQueue, stopQueue } from './ai/queue.js';
@@ -38,7 +39,7 @@ export async function buildServer() {
   await initEvents();
   const app = Fastify({ logger: false, trustProxy: config.trustProxy, bodyLimit: 20 * 1024 * 1024 });
   await app.register(cookie);
-  await app.register(multipart, { limits: { fileSize: config.maxUpload, files: 1 } });
+  await app.register(multipart, { limits: { fileSize: Math.max(config.maxUpload, config.maxImport), files: 1 } });
   await app.register(websocket, { options: { maxPayload: 32 * 1024 * 1024 } });
 
   app.setErrorHandler((err, req, reply) => {
@@ -58,6 +59,7 @@ export async function buildServer() {
   await app.register(aiRoutes);
   await app.register(linkRoutes);
   await app.register(halcyonRoutes);
+  await app.register(importRoutes);
 
   // Page content (Yjs / Hocuspocus protocol). Native apps pass ?token=<api token>.
   app.register(async (scope) => {

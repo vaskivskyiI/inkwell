@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
-import { User, Layers, Sparkles, PenLine, Plug, KeyRound, Shield, Trash2, Plus, Check, RefreshCw } from 'lucide-react';
-import { get, post, put, patch, del } from './api.js';
-import { store, useStore, navigate, toast, toastError, localGet } from './store.js';
-import { loadSpaces, switchSpace } from './data.js';
+import { User, Layers, Sparkles, PenLine, Plug, KeyRound, Shield, Trash2, Plus, Check, RefreshCw, Upload } from 'lucide-react';
+import { get, post, put, patch, del, api } from './api.js';
+import { store, useStore, navigate, openNote, toast, toastError, localGet } from './store.js';
+import { loadSpaces, switchSpace, loadTree } from './data.js';
 import { setTheme } from './theme.js';
 
-
-const SECTIONS = [['profile', 'Profile', User], ['spaces', 'Spaces & sharing', Layers], ['ai', 'AI', Sparkles], ['pen', 'Pen & paper', PenLine], ['integrations', 'Integrations', Plug], ['tokens', 'Apps & tokens', KeyRound], ['admin', 'Administration', Shield]];
+const SECTIONS = [['profile', 'Profile', User], ['spaces', 'Spaces & sharing', Layers], ['ai', 'AI', Sparkles], ['pen', 'Pen & paper', PenLine], ['integrations', 'Integrations', Plug], ['import', 'Import', Upload], ['tokens', 'Apps & tokens', KeyRound], ['admin', 'Administration', Shield]];
 
 export function SettingsPage({ section }) {
   const user = useStore((s) => s.user);
@@ -24,6 +23,7 @@ export function SettingsPage({ section }) {
         {cur === 'ai' && <AiSettings />}
         {cur === 'pen' && <PenSettings />}
         {cur === 'integrations' && <Integrations />}
+        {cur === 'import' && <Import />}
         {cur === 'tokens' && <Tokens />}
         {cur === 'admin' && user?.isAdmin && <Admin />}
       </div>
@@ -248,6 +248,56 @@ function Integrations() {
           <Field label="Assistant token"><input type="password" value={form.token} placeholder="hmcp_…" onChange={(e) => setForm({ ...form, token: e.target.value })} /></Field>
           <button className="primary" disabled={busy || !form.baseUrl || !form.token} onClick={connect}>{busy ? 'Checking…' : 'Connect'}</button>
         </>
+      )}
+    </>
+  );
+}
+
+function Import() {
+  const spaces = useStore((s) => s.spaces).filter((s) => ['owner', 'editor'].includes(s.role));
+  const current = useStore((s) => s.spaceId);
+  const [chosen, setSpaceId] = useState(null);
+  // Spaces may still be loading on first render: fall back to the current one until the user picks.
+  const spaceId = spaces.some((s) => s.id === chosen) ? chosen : spaces.some((s) => s.id === current) ? current : spaces[0]?.id;
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const run = async () => {
+    setBusy(true); setResult(null);
+    try {
+      const fd = new FormData();
+      fd.append('spaceId', spaceId);
+      fd.append('file', file, file.name);
+      const r = await api('POST', '/api/import', fd);
+      setResult(r);
+      await loadTree(spaceId);
+      toast(`Imported ${r.pages} page${r.pages === 1 ? '' : 's'}`);
+    } catch (e) { toastError(e); } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <h2>Import</h2>
+      <h3>From AFFiNE</h3>
+      <ol className="hint">
+        <li>In AFFiNE export the workspace (or a doc) as a <b>Snapshot</b> and save the <code>.zip</code> — it contains <code>*.snapshot.json</code> files and an <code>assets</code> folder.</li>
+        <li>Choose it below. Headings, lists, to-dos, tables, code, callouts, images, files, links between docs and pen strokes from edgeless canvases are kept;
+          docs embedded as linked cards become sub-pages. Database views arrive as plain lists; edgeless shapes are skipped.</li>
+      </ol>
+      <h3>From Markdown, Notion or Obsidian</h3>
+      <p className="hint">A single <code>.md</code> file or a <code>.zip</code> of them: folders become parent pages, relative images are uploaded, links between files become page links.</p>
+      <Field label="Into space">
+        <select value={spaceId} onChange={(e) => setSpaceId(e.target.value)}>{spaces.map((s) => <option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}</select>
+      </Field>
+      <Field label="File" hint="Everything lands under one new page “Imported from …”, which you can move or rename afterwards.">
+        <input type="file" accept=".zip,.md,.markdown" onChange={(e) => setFile(e.target.files[0] || null)} />
+      </Field>
+      <button className="primary" disabled={!file || !spaceId || busy} onClick={run}>{busy ? <><span className="spinner" /> Importing…</> : <><Upload size={15} /> Import</>}</button>
+      {result && (
+        <div className="banner">
+          <Check size={16} /> {result.pages} pages and {result.assets} files imported.
+          <button onClick={() => openNote(result.rootId)}>Open</button>
+          {result.warnings.length > 0 && <ul className="hint">{result.warnings.map((w) => <li key={w}>{w}</li>)}</ul>}
+        </div>
       )}
     </>
   );

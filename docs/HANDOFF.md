@@ -15,7 +15,7 @@ MCP endpoint (no Halcyon changes needed for the Inkwell → Halcyon direction).
 
 ## 2. State
 - 3 commits. Server + web UI implement everything in docs/PLAN.md §2 except the roadmap items.
-- Tests: `npm test` 34/34 (unit, API, real-WebSocket collaboration, AI with mock provider, fake Halcyon MCP).
+- Tests: `npm test` 37/37 (incl. AFFiNE snapshot and Markdown-zip import) (unit, API, real-WebSocket collaboration, AI with mock provider, fake Halcyon MCP).
   `npm run test:pg -w server`: API 12/12 + AI 7/7 through the production `pg` driver (PGlite wire server).
 - UI checked in the desktop app's browser: sign-up, home, editor (collab load, slash menu, ink block, drawing),
   background handwriting recognition shown under the ink, AI panel (summary, tags, action items, handwriting),
@@ -29,11 +29,12 @@ MCP endpoint (no Halcyon changes needed for the Inkwell → Halcyon direction).
    `@resvg/resvg-js` must find its linux-x64-gnu prebuilt in the image.
 3. **Real AI models**: handwriting prompt with a real vision model (qwen2.5vl:7b on Ollama, GPT-4.1, Claude, Gemini) —
    check transcription quality on real handwriting, JSON reliability of small local models, and image size limits.
-4. **Real Halcyon**: connect with an `hmcp_` token (propose access), check event/mail/task searches and deep links
+4. **Real AFFiNE export**: the importer follows AFFiNE's snapshot zip format (`<title>-<id>.snapshot.json` + `assets/`) but was only tested with synthetic files — import a real workspace export and compare.
+5. **Real Halcyon**: connect with an `hmcp_` token (propose access), check event/mail/task searches and deep links
    (`#/mail/unified/<id>`, `#/calendar`, `#/tasks`).
-5. Real pens: Surface Pen / Wacom / iPad Pencil / S-Pen — pressure, eraser button (`buttons & 32`), palm rejection
+6. Real pens: Surface Pen / Wacom / iPad Pencil / S-Pen — pressure, eraser button (`buttons & 32`), palm rejection
    ("pen only" after the first pen event), touch scrolling inside ink areas.
-6. Several app instances behind a load balancer with `INKWELL_REDIS_URL` (needs `@hocuspocus/extension-redis` installed).
+7. Several app instances behind a load balancer with `INKWELL_REDIS_URL` (needs `@hocuspocus/extension-redis` installed).
 
 ## 4. Known gaps / roadmap
 1. Comments & @mentions with notifications (role `commenter` exists but can only read today).
