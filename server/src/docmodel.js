@@ -247,7 +247,8 @@ export function markdownToBlocks(md) {
       i = next;
     } else {
       const p = [];
-      while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|```|\s*>|\s*\|)/.test(lines[i]) && !isList(lines[i])) p.push(lines[i++].trim());
+      while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|```|\s*>|\s*\|.*\|\s*$)/.test(lines[i]) && !isList(lines[i])) p.push(lines[i++].trim());
+      if (!p.length) p.push(lines[i++].trim()); // always make progress
       blocks.push(para(p.join(' ')));
     }
   }

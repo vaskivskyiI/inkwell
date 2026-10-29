@@ -80,7 +80,8 @@ export async function buildServer() {
 
   if (fs.existsSync(path.join(config.webDir, 'index.html'))) {
     await app.register(fastifyStatic, { root: config.webDir, wildcard: true, index: false, cacheControl: false, setHeaders: (res, file) => {
-      res.setHeader('cache-control', /[\\/]assets[\\/]/.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache');
+      // @fastify/static ≥10 hands over the reply, older versions the raw response.
+      (res.setHeader ? res.setHeader.bind(res) : res.header.bind(res))('cache-control', /[\\/]assets[\\/]/.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache');
     } });
     const html = () => fs.readFileSync(path.join(config.webDir, 'index.html'));
     app.get('/', (req, reply) => reply.type('text/html').header('cache-control', 'no-cache').send(html()));

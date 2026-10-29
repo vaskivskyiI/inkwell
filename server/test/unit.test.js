@@ -93,6 +93,12 @@ test('html export escapes content and drops unsafe links', () => {
   assert.match(html, /&lt;x&gt;/);
 });
 
+test('odd Markdown never hangs the parser', () => {
+  for (const md of ['| not a table', '- [ ] ', '1.', '>', '```', '#', '- \n  - \n- [x]', '|a|\n|---|', '![x](y) tail', '  \n\t\n']) {
+    assert.ok(Array.isArray(markdownToBlocks(md)), md);
+  }
+});
+
 test('appendBlocks adds to an existing doc', () => {
   const doc = buildDoc({ blocks: markdownToBlocks('one') });
   appendBlocks(doc, markdownToBlocks('## two'));

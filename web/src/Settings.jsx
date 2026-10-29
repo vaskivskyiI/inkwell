@@ -1,0 +1,300 @@
+import { useEffect, useState } from 'react';
+import { User, Layers, Sparkles, PenLine, Plug, KeyRound, Shield, Trash2, Plus, Check, RefreshCw } from 'lucide-react';
+import { get, post, put, patch, del } from './api.js';
+import { store, useStore, navigate, toast, toastError, localGet } from './store.js';
+import { loadSpaces, switchSpace } from './data.js';
+import { setTheme } from './theme.js';
+
+
+const SECTIONS = [['profile', 'Profile', User], ['spaces', 'Spaces & sharing', Layers], ['ai', 'AI', Sparkles], ['pen', 'Pen & paper', PenLine], ['integrations', 'Integrations', Plug], ['tokens', 'Apps & tokens', KeyRound], ['admin', 'Administration', Shield]];
+
+export function SettingsPage({ section }) {
+  const user = useStore((s) => s.user);
+  const cur = section || 'profile';
+  return (
+    <div className="settings">
+      <nav className="settings-nav">
+        {SECTIONS.filter(([id]) => id !== 'admin' || user?.isAdmin).map(([id, label, Icon]) => (
+          <a key={id} href={`#/settings/${id}`} className={cur === id ? 'on' : ''}><Icon size={16} /> {label}</a>
+        ))}
+      </nav>
+      <div className="settings-body">
+        {cur === 'profile' && <Profile />}
+        {cur === 'spaces' && <Spaces />}
+        {cur === 'ai' && <AiSettings />}
+        {cur === 'pen' && <PenSettings />}
+        {cur === 'integrations' && <Integrations />}
+        {cur === 'tokens' && <Tokens />}
+        {cur === 'admin' && user?.isAdmin && <Admin />}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, hint, children }) {
+  return <label className="field"><span className="label">{label}</span>{children}{hint && <span className="hint">{hint}</span>}</label>;
+}
+
+async function saveSettings(patchObj) {
+  const s = await put('/api/settings', patchObj);
+  store.set({ settings: s });
+  return s;
+}
+
+function Profile() {
+  const user = useStore((s) => s.user);
+  const [name, setName] = useState(user.name);
+  const [color, setColor] = useState(user.color);
+  const [pw, setPw] = useState({ password: '', newPassword: '' });
+  const [theme, setThemePref] = useState(localGet('theme') || 'system');
+  const save = async () => { const u = await patch('/api/me', { name, color }); store.set({ user: u }); toast('Saved'); };
+  const changePw = async () => { await patch('/api/me', pw); setPw({ password: '', newPassword: '' }); toast('Password changed — other browsers were signed out'); };
+  return (
+    <>
+      <h2>Profile</h2>
+      <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+      <Field label="Colour" hint="Your cursor and avatar colour for co-editors."><input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></Field>
+      <Field label="E-mail"><input value={user.email} disabled /></Field>
+      <button className="primary" onClick={() => save().catch(toastError)}>Save</button>
+      <h3>Appearance</h3>
+      <div className="seg">{['system', 'light', 'dark'].map((t) => <button key={t} className={theme === t ? 'on' : ''} onClick={() => { setThemePref(t); setTheme(t); }}>{t[0].toUpperCase() + t.slice(1)}</button>)}</div>
+      <h3>Password</h3>
+      <Field label="Current password"><input type="password" autoComplete="current-password" value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} /></Field>
+      <Field label="New password" hint="At least 8 characters."><input type="password" autoComplete="new-password" value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} /></Field>
+      <button onClick={() => changePw().catch(toastError)} disabled={!pw.password || pw.newPassword.length < 8}>Change password</button>
+    </>
+  );
+}
+
+function Spaces() {
+  const spaces = useStore((s) => s.spaces);
+  const route = useStore((s) => s.route);
+  const [sel, setSel] = useState(route.query.space || spaces[0]?.id);
+  const space = spaces.find((s) => s.id === sel) || spaces[0];
+  const [members, setMembers] = useState([]);
+  const [invite, setInvite] = useState({ email: '', role: 'editor' });
+  const [edit, setEdit] = useState(null);
+  const owner = space?.role === 'owner';
+  const loadMembers = () => space && get(`/api/spaces/${space.id}/members`).then(setMembers).catch(toastError);
+  useEffect(() => { loadMembers(); setEdit(space ? { name: space.name, icon: space.icon, color: space.color } : null); }, [space?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!space) return null;
+  const me = store.get().user;
+  return (
+    <>
+      <h2>Spaces & sharing</h2>
+      <div className="space-list">
+        {spaces.map((s) => <button key={s.id} className={s.id === space.id ? 'on' : ''} onClick={() => setSel(s.id)}><span className="space-icon" style={{ background: s.color }}>{s.icon || s.name[0]}</span>{s.name}<span className="muted small">{s.role}{s.members > 1 ? ` · ${s.members} people` : ''}</span></button>)}
+        <button onClick={async () => { const name = window.prompt('Name of the new space'); if (name) { const s = await post('/api/spaces', { name }); await loadSpaces(); setSel(s.id); } }}><Plus size={15} /> New space</button>
+      </div>
+      {owner && edit && (
+        <div className="row wrap">
+          <Field label="Icon"><input className="short" value={edit.icon} maxLength={4} onChange={(e) => setEdit({ ...edit, icon: e.target.value })} /></Field>
+          <Field label="Name"><input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
+          <Field label="Colour"><input type="color" value={edit.color} onChange={(e) => setEdit({ ...edit, color: e.target.value })} /></Field>
+          <button className="primary" onClick={() => patch(`/api/spaces/${space.id}`, edit).then(loadSpaces).then(() => toast('Saved')).catch(toastError)}>Save</button>
+        </div>
+      )}
+      {owner && (
+        <>
+          <label className="check"><input type="checkbox" checked={!!space.settings?.localAiOnly} onChange={(e) => patch(`/api/spaces/${space.id}`, { settings: { localAiOnly: e.target.checked } }).then(loadSpaces).catch(toastError)} />
+            Only local AI for this space <span className="hint">— pages here are never sent to cloud AI providers (Ollama / LAN servers only).</span></label>
+          <label className="check"><input type="checkbox" checked={space.settings?.aiEnabled !== false} onChange={(e) => patch(`/api/spaces/${space.id}`, { settings: { aiEnabled: e.target.checked } }).then(loadSpaces).catch(toastError)} /> AI features in this space</label>
+        </>
+      )}
+      <h3>People</h3>
+      <table className="members">
+        <tbody>
+          {members.map((m) => (
+            <tr key={m.id}>
+              <td><span className="avatar" style={{ background: m.color }}>{m.name[0]}</span> {m.name} <span className="muted small">{m.email}</span></td>
+              <td>{owner && m.id !== me.id ? (
+                <select value={m.role} onChange={(e) => patch(`/api/spaces/${space.id}/members/${m.id}`, { role: e.target.value }).then(loadMembers).catch(toastError)}>
+                  {['owner', 'editor', 'commenter', 'viewer'].map((r) => <option key={r}>{r}</option>)}
+                </select>) : m.role}</td>
+              <td>{(owner || m.id === me.id) && <button className="icon small" title={m.id === me.id ? 'Leave space' : 'Remove'} onClick={() => del(`/api/spaces/${space.id}/members/${m.id}`).then(() => (m.id === me.id ? loadSpaces() : loadMembers())).catch(toastError)}><Trash2 size={14} /></button>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {owner && (
+        <div className="row wrap">
+          <input placeholder="colleague@example.com" value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} />
+          <select value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value })}>{['editor', 'commenter', 'viewer', 'owner'].map((r) => <option key={r}>{r}</option>)}</select>
+          <button className="primary" onClick={() => post(`/api/spaces/${space.id}/members`, invite).then(() => { setInvite({ email: '', role: 'editor' }); loadMembers(); loadSpaces(); toast('Shared'); }).catch(toastError)}>Share</button>
+        </div>
+      )}
+      <p className="hint">Editors write and organise pages; commenters and viewers read (commenting comes later). Everyone sees co-editors' cursors live.</p>
+      {owner && <><h3>Danger zone</h3><button className="danger" onClick={() => { if (window.confirm(`Delete the space “${space.name}” with all its pages for everyone?`)) del(`/api/spaces/${space.id}`).then(loadSpaces).then(() => switchSpace(store.get().spaces[0]?.id)).catch(toastError); }}><Trash2 size={14} /> Delete space</button></>}
+    </>
+  );
+}
+
+function AiSettings() {
+  const settings = useStore((s) => s.settings);
+  const user = useStore((s) => s.user);
+  const [types, setTypes] = useState([]);
+  const [providers, setProviders] = useState([]);
+  const [status, setStatus] = useState(null);
+  const [failed, setFailed] = useState([]);
+  const [form, setForm] = useState(null);
+  const [models, setModels] = useState({});
+  const load = () => Promise.all([get('/api/ai/providers').then(setProviders), get('/api/ai/status').then(setStatus), get('/api/ai/failed').then(setFailed)]).catch(toastError);
+  useEffect(() => { get('/api/ai/types').then(setTypes).catch(toastError); load(); }, []);
+  const loadModels = (id) => post('/api/ai/models', { id }).then((m) => setModels((x) => ({ ...x, [id]: m }))).catch(toastError);
+  const test = async (body) => { const r = await post('/api/ai/test', body); toast(r.ok ? `Works (${r.model}, ${r.ms} ms): “${r.reply}”` : `Failed: ${r.error}`, { kind: r.ok ? 'info' : 'error', duration: 7000 }); };
+  const addProvider = async () => { await post('/api/ai/providers', form); setForm(null); load(); toast('Provider added'); };
+  const route = (task, providerId, model) => saveSettings({ ai: { [task]: providerId ? { providerId, model } : null } }).then(load);
+  if (!settings) return null;
+  const T = (id) => types.find((t) => t.id === id);
+  return (
+    <>
+      <h2>AI</h2>
+      <label className="check"><input type="checkbox" checked={settings.ai.enabled} onChange={(e) => saveSettings({ ai: { enabled: e.target.checked } })} /> Use AI</label>
+      <label className="check"><input type="checkbox" checked={settings.ai.background} onChange={(e) => saveSettings({ ai: { background: e.target.checked } })} /> Work in the background <span className="hint">— summaries, handwriting, image text and search index are ready before you ask.</span></label>
+      <Field label="Language of AI output" hint="Empty: the language of each page."><input value={settings.language} placeholder="e.g. Slovenian" onChange={(e) => store.set({ settings: { ...settings, language: e.target.value } })} onBlur={(e) => saveSettings({ language: e.target.value })} /></Field>
+
+      <h3>Providers</h3>
+      {providers.map((p) => (
+        <div key={p.id} className="provider">
+          <b>{p.name}</b> <span className="muted small">{T(p.type)?.label || p.type}{p.baseUrl ? ` · ${p.baseUrl}` : ''}{p.shared ? ' · server-wide' : ''}</span>
+          <span className="grow" />
+          <button onClick={() => test({ id: p.id }).catch(toastError)}>Test</button>
+          {!p.env && (!p.shared || user.isAdmin) && <button className="icon small" onClick={() => del(`/api/ai/providers/${p.id}`).then(load).catch(toastError)} aria-label="Remove"><Trash2 size={14} /></button>}
+        </div>
+      ))}
+      {!form ? <button onClick={() => setForm({ type: 'ollama', name: '', baseUrl: '', apiKey: '' })}><Plus size={14} /> Add provider</button> : (
+        <div className="card-form">
+          <Field label="Type"><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>{types.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}</select></Field>
+          <Field label="Name"><input value={form.name} placeholder={T(form.type)?.label} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+          <Field label="Address" hint={`Default: ${T(form.type)?.defaultBaseUrl || '—'}`}><input value={form.baseUrl} placeholder={T(form.type)?.defaultBaseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} /></Field>
+          {T(form.type)?.needsKey !== false && <Field label="API key"><input type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} /></Field>}
+          {user.isAdmin && <label className="check"><input type="checkbox" checked={!!form.shared} onChange={(e) => setForm({ ...form, shared: e.target.checked })} /> Server-wide (all users may use it)</label>}
+          <div className="row"><button onClick={() => test(form).catch(toastError)}>Test</button><button className="primary" onClick={() => addProvider().catch(toastError)}>Add</button><button onClick={() => setForm(null)}>Cancel</button></div>
+        </div>
+      )}
+
+      <h3>Which model does what</h3>
+      <p className="hint">Handwriting and images need a vision model (e.g. qwen2.5vl, llava, GPT-4.1, Claude, Gemini). Search by meaning needs an embedding model.</p>
+      {[['chat', 'Writing, summaries, questions'], ['vision', 'Handwriting & images'], ['embed', 'Search by meaning']].map(([task, label]) => {
+        const r = settings.ai[task];
+        return (
+          <div key={task} className="route-row">
+            <span className="label">{label}</span>
+            <select value={r?.providerId || ''} onChange={(e) => route(task, e.target.value, '')}>
+              <option value="">Automatic{status?.[task] ? ` (${status[task].provider} · ${status[task].model})` : ' (none)'}</option>
+              {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            {r?.providerId && (
+              <>
+                <input list={`models-${task}`} value={r.model || ''} placeholder="default model" onFocus={() => !models[r.providerId] && loadModels(r.providerId)}
+                  onChange={(e) => store.set({ settings: { ...settings, ai: { ...settings.ai, [task]: { ...r, model: e.target.value } } } })} onBlur={(e) => route(task, r.providerId, e.target.value)} />
+                <datalist id={`models-${task}`}>{(models[r.providerId] || []).map((m) => <option key={m.id} value={m.id} />)}</datalist>
+              </>
+            )}
+          </div>
+        );
+      })}
+      <h3>Background work</h3>
+      <p>{status ? `${status.jobs.queued} waiting · ${status.jobs.running} running · ${status.jobs.failed} failed` : '…'}</p>
+      <div className="row">
+        <button onClick={() => post('/api/ai/reanalyse').then((r) => toast(`${r.queued} pages queued`)).catch(toastError)}><RefreshCw size={14} /> Re-analyse all my pages</button>
+        {failed.length > 0 && <button onClick={() => post('/api/ai/failed/retry').then(load).catch(toastError)}>Retry failed</button>}
+      </div>
+      {failed.slice(0, 5).map((f, i) => <p key={i} className="error small">{f.type}: {f.error}</p>)}
+    </>
+  );
+}
+
+function PenSettings() {
+  const settings = useStore((s) => s.settings);
+  if (!settings) return null;
+  return (
+    <>
+      <h2>Pen & paper</h2>
+      <Field label="Paper for new journal pages">
+        <div className="seg">{['ruled', 'grid', 'dotted', 'plain'].map((p) => <button key={p} className={settings.paper === p ? 'on' : ''} onClick={() => saveSettings({ paper: p })}>{p}</button>)}</div>
+      </Field>
+      <Field label="Touch and pen" hint="Automatic: once you use a pen, fingers scroll and only the pen writes (palm rejection).">
+        <div className="seg">{[['auto', 'Automatic'], ['on', 'Pen only'], ['off', 'Fingers draw too']].map(([v, l]) => <button key={v} className={settings.penOnly === v ? 'on' : ''} onClick={() => saveSettings({ penOnly: v })}>{l}</button>)}</div>
+      </Field>
+      <h3>Shortcuts on a canvas</h3>
+      <p className="hint">P pen · H highlighter · E eraser · L lasso (select, drag to move, Delete) · T text box (journal) · Ctrl+Z / Ctrl+Y undo/redo. The pen's eraser end and barrel button erase.</p>
+    </>
+  );
+}
+
+function Integrations() {
+  const halcyon = useStore((s) => s.halcyon);
+  const [form, setForm] = useState({ baseUrl: '', token: '' });
+  const [busy, setBusy] = useState(false);
+  const connect = async () => {
+    setBusy(true);
+    try { const r = await put('/api/integrations/halcyon', form); store.set({ halcyon: r }); toast('Halcyon connected'); } catch (e) { toastError(e); } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <h2>Integrations</h2>
+      <h3>Halcyon — mail, calendar & tasks</h3>
+      <p>Link pages with e-mails, meetings and tasks, start meeting notes from your calendar and send action items to your task list.</p>
+      {halcyon?.connected ? (
+        <div className="row"><Check size={16} /> Connected to <b>{halcyon.baseUrl}</b><span className="grow" /><button onClick={() => del('/api/integrations/halcyon').then(() => store.set({ halcyon: { connected: false } })).catch(toastError)}>Disconnect</button></div>
+      ) : (
+        <>
+          <ol className="hint">
+            <li>In Halcyon open <b>Settings → Assistants</b> and create a token for “Inkwell” (choose <i>propose</i> access so Inkwell can add tasks).</li>
+            <li>Paste Halcyon's address and the token here.</li>
+          </ol>
+          <Field label="Halcyon address"><input value={form.baseUrl} placeholder="https://mail.example.com" onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} /></Field>
+          <Field label="Assistant token"><input type="password" value={form.token} placeholder="hmcp_…" onChange={(e) => setForm({ ...form, token: e.target.value })} /></Field>
+          <button className="primary" disabled={busy || !form.baseUrl || !form.token} onClick={connect}>{busy ? 'Checking…' : 'Connect'}</button>
+        </>
+      )}
+    </>
+  );
+}
+
+function Tokens() {
+  const [tokens, setTokens] = useState([]);
+  const [fresh, setFresh] = useState(null);
+  const load = () => get('/api/tokens').then(setTokens).catch(toastError);
+  useEffect(() => { load(); }, []);
+  return (
+    <>
+      <h2>Apps & tokens</h2>
+      <p>Native apps sign in and get their own token. Create one here for scripts or for Halcyon to look up notes linked to its e-mails and events (<code>GET /api/links/lookup?kind=event&ref=…</code>).</p>
+      {fresh && <div className="banner">Copy it now — it is shown only once: <code className="select">{fresh}</code></div>}
+      <button onClick={async () => { const name = window.prompt('Name for the token', 'Halcyon'); if (name) { setFresh((await post('/api/tokens', { name })).token); load(); } }}><Plus size={14} /> New token</button>
+      <table className="members"><tbody>
+        {tokens.map((t) => <tr key={t.id}><td><b>{t.name}</b></td><td className="muted small">created {new Date(t.createdAt).toLocaleDateString()}{t.lastUsedAt ? ` · used ${new Date(t.lastUsedAt).toLocaleDateString()}` : ''}</td>
+          <td><button className="icon small" onClick={() => del(`/api/tokens/${t.id}`).then(load).catch(toastError)} aria-label="Revoke"><Trash2 size={14} /></button></td></tr>)}
+      </tbody></table>
+    </>
+  );
+}
+
+function Admin() {
+  const [users, setUsers] = useState([]);
+  const [cfg, setCfg] = useState(null);
+  const load = () => Promise.all([get('/api/admin/users').then(setUsers), get('/api/admin/settings').then(setCfg)]).catch(toastError);
+  useEffect(() => { load(); }, []);
+  return (
+    <>
+      <h2>Administration</h2>
+      {cfg && <label className="check"><input type="checkbox" checked={cfg.allowSignup} onChange={(e) => put('/api/admin/settings', { allowSignup: e.target.checked }).then(load).catch(toastError)} /> Anyone can create an account on this server</label>}
+      <h3>Users</h3>
+      <table className="members"><tbody>
+        {users.map((u) => (
+          <tr key={u.id}>
+            <td><span className="avatar" style={{ background: u.color }}>{u.name[0]}</span> {u.name} <span className="muted small">{u.email}</span></td>
+            <td className="muted small">{u.spaces} spaces{u.isAdmin ? ' · admin' : ''}{u.disabled ? ' · disabled' : ''}</td>
+            <td>
+              <button onClick={() => patch(`/api/admin/users/${u.id}`, { isAdmin: !u.isAdmin }).then(load).catch(toastError)}>{u.isAdmin ? 'Remove admin' : 'Make admin'}</button>
+              <button className={u.disabled ? '' : 'danger'} onClick={() => patch(`/api/admin/users/${u.id}`, { disabled: !u.disabled }).then(load).catch(toastError)}>{u.disabled ? 'Enable' : 'Disable'}</button>
+            </td>
+          </tr>
+        ))}
+      </tbody></table>
+      <p className="hint">Server-wide AI providers are added under Settings → AI (tick “Server-wide”). <button className="link" onClick={() => navigate('#/settings/ai')}>Open</button></p>
+    </>
+  );
+}
