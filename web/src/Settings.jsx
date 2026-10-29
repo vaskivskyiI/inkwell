@@ -225,11 +225,12 @@ function PenSettings() {
 
 function Integrations() {
   const halcyon = useStore((s) => s.halcyon);
-  const [form, setForm] = useState({ baseUrl: '', token: '' });
+  const [form, setForm] = useState({ baseUrl: '', token: '', tls: { mode: 'check', ca: '' } });
   const [busy, setBusy] = useState(false);
+  const tlsBody = form.tls.mode === 'skip' ? { insecure: true } : form.tls.mode === 'ca' ? { ca: form.tls.ca } : undefined;
   const connect = async () => {
     setBusy(true);
-    try { const r = await put('/api/integrations/halcyon', form); store.set({ halcyon: r }); toast('Halcyon connected'); } catch (e) { toastError(e); } finally { setBusy(false); }
+    try { const r = await put('/api/integrations/halcyon', { baseUrl: form.baseUrl, token: form.token, tls: tlsBody }); store.set({ halcyon: r }); toast('Halcyon connected'); } catch (e) { toastError(e); } finally { setBusy(false); }
   };
   return (
     <>
@@ -237,7 +238,7 @@ function Integrations() {
       <h3>Halcyon — mail, calendar & tasks</h3>
       <p>Link pages with e-mails, meetings and tasks, start meeting notes from your calendar and send action items to your task list.</p>
       {halcyon?.connected ? (
-        <div className="row"><Check size={16} /> Connected to <b>{halcyon.baseUrl}</b><span className="grow" /><button onClick={() => del('/api/integrations/halcyon').then(() => store.set({ halcyon: { connected: false } })).catch(toastError)}>Disconnect</button></div>
+        <div className="row"><Check size={16} /> Connected to <b>{halcyon.baseUrl}</b>{halcyon.settings?.tls?.insecure ? <span className="muted small"> · certificate not checked</span> : halcyon.settings?.tls?.ca ? <span className="muted small"> · own certificate authority</span> : null}<span className="grow" /><button onClick={() => del('/api/integrations/halcyon').then(() => store.set({ halcyon: { connected: false } })).catch(toastError)}>Disconnect</button></div>
       ) : (
         <>
           <ol className="hint">
@@ -246,9 +247,41 @@ function Integrations() {
           </ol>
           <Field label="Halcyon address"><input value={form.baseUrl} placeholder="https://mail.example.com" onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} /></Field>
           <Field label="Assistant token"><input type="password" value={form.token} placeholder="hmcp_…" onChange={(e) => setForm({ ...form, token: e.target.value })} /></Field>
+          {/^https:/i.test(form.baseUrl.trim()) && <CertField value={form.tls} onChange={(tls) => setForm({ ...form, tls })} />}
           <button className="primary" disabled={busy || !form.baseUrl || !form.token} onClick={connect}>{busy ? 'Checking…' : 'Connect'}</button>
         </>
       )}
+    </>
+  );
+}
+
+/**
+ * Halcyon's certificate: checked as usual, checked against the user's own certificate authority (self-signed, a
+ * company or home CA — pasted or loaded from a .pem/.crt/.cer file), or not checked.
+ */
+function CertField({ value, onChange }) {
+  const load = async (e) => {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file) return;
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const text = new TextDecoder().decode(buf);
+    // A binary (DER) certificate becomes PEM.
+    const pem = text.includes('-----BEGIN') ? text.trim()
+      : `-----BEGIN CERTIFICATE-----\n${btoa(String.fromCharCode(...buf)).replace(/.{64}/g, '$&\n').trim()}\n-----END CERTIFICATE-----`;
+    onChange({ mode: 'ca', ca: pem });
+  };
+  return (
+    <>
+      <Field label="Halcyon's certificate"><select value={value.mode} onChange={(e) => onChange({ ...value, mode: e.target.value })}>
+        <option value="check">Check as usual</option>
+        <option value="ca">Trust my certificate authority (self-signed / own CA)</option>
+        <option value="skip">Do not check (not safe)</option>
+      </select></Field>
+      {value.mode === 'ca' && <>
+        <textarea rows={4} style={{ fontFamily: 'monospace', fontSize: 11, width: '100%' }} placeholder={'-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----'} value={value.ca} onChange={(e) => onChange({ ...value, ca: e.target.value })} />
+        <p className="hint">The certificate of the authority that signed Halcyon's certificate (or Halcyon's own self-signed one). <label style={{ color: 'var(--accent)', cursor: 'pointer' }}>Load from file…<input type="file" accept=".pem,.crt,.cer,.der" hidden onChange={load} /></label></p>
+      </>}
+      {value.mode === 'skip' && <p className="hint error">The connection stays encrypted, but Inkwell cannot tell Halcyon from an impostor. Prefer adding your certificate authority.</p>}
     </>
   );
 }

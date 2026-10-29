@@ -67,3 +67,4 @@ MCP endpoint (no Halcyon changes needed for the Inkwell → Halcyon direction).
 - Windows: port 8080 is reserved (EACCES) — dev preview uses 8090. Node 26 was installed by winget.
 - Hocuspocus 4 takes a Fetch `Request`; bridge from `@fastify/websocket` in `collab.handleSocket`.
 - Markdown parsers must always make progress (a `| foo` or `- [ ] ` line used to loop forever).
+- Halcyon behind a private CA: Settings → Integrations takes its CA (PEM, pasted or from a .pem/.crt/.cer file) or "do not check", kept in `integrations.settings_json.tls`; MCP calls then use `node:https` with that CA added to Node's roots (`integrations/halcyon.js` postJson). Test certificates: `server/test/fixtures/tls`.

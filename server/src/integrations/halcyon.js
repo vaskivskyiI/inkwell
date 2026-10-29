@@ -1,5 +1,7 @@
 // Halcyon (mail, calendar, tasks) through its MCP endpoint: the user pastes Halcyon's URL and an assistant token
 // (Halcyon → Settings → Assistants; "propose" access also allows creating tasks). Inkwell never sees mail passwords.
+import https from 'node:https';
+import tls from 'node:tls';
 import { one, q, now } from '../db/index.js';
 import { encrypt, decrypt } from '../util/crypto.js';
 import { fail, str } from '../util/http.js';
@@ -10,15 +12,40 @@ let rpcId = 1;
 
 export async function connection(userId) {
   const r = await one("SELECT base_url, token_enc, settings_json FROM integrations WHERE user_id = $1 AND kind = 'halcyon'", userId);
-  return r && { baseUrl: r.base_url, token: decrypt(r.token_enc), settings: r.settings_json };
+  return r && { baseUrl: r.base_url, token: decrypt(r.token_enc), settings: r.settings_json, tls: r.settings_json?.tls };
+}
+
+// Halcyon behind a private certificate authority or with a self-signed certificate: its CA (PEM) is added to Node's
+// roots, or — when the user chose so — the certificate is not checked. Otherwise plain fetch, as before.
+const tlsOptions = (t) => (t?.insecure ? { rejectUnauthorized: false } : t?.ca ? { ca: [...tls.rootCertificates, t.ca] } : null);
+function postJson(url, { headers, body, signal, tls: t }) {
+  const opts = url.startsWith('https:') && tlsOptions(t);
+  if (!opts) return fetch(url, { method: 'POST', headers, body, signal });
+  return new Promise((resolve, reject) => {
+    const req = https.request(url, { method: 'POST', headers: { ...headers, 'content-length': Buffer.byteLength(body) }, signal, ...opts }, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => resolve({ status: res.statusCode, ok: res.statusCode >= 200 && res.statusCode < 300, json: async () => JSON.parse(data) }));
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+const CERT = /self.signed|unable to verify|unable to get local issuer|certificate|CERT_|leaf signature/i;
+function reachError(e) {
+  const code = e.cause?.code || e.code || e.cause?.message || e.message;
+  return CERT.test(`${code} ${e.cause?.message || ''} ${e.message}`)
+    ? `Halcyon's certificate is not trusted (${code}) — add its certificate authority, or choose not to check it`
+    : `Cannot reach Halcyon: ${code}`;
 }
 
 export async function call(conn, tool, args = {}, { timeoutMs = 20000 } = {}) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const r = await fetch(`${conn.baseUrl}/api/mcp`, {
-      method: 'POST', signal: ctl.signal,
+    const r = await postJson(`${conn.baseUrl}/api/mcp`, {
+      signal: ctl.signal, tls: conn.tls,
       headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${conn.token}` },
       body: JSON.stringify({ jsonrpc: '2.0', id: rpcId++, method: 'tools/call', params: { name: tool, arguments: args } }),
     });
@@ -32,7 +59,7 @@ export async function call(conn, tool, args = {}, { timeoutMs = 20000 } = {}) {
   } catch (e) {
     if (e.statusCode) throw e;
     log.warn(`${tool} failed: ${e.message}`);
-    fail(502, e.name === 'AbortError' ? 'Halcyon did not answer in time' : `Cannot reach Halcyon: ${e.cause?.code || e.message}`);
+    fail(502, e.name === 'AbortError' ? 'Halcyon did not answer in time' : reachError(e));
   } finally { clearTimeout(t); }
 }
 
@@ -93,11 +120,15 @@ export default async function halcyonRoutes(app) {
     const token = str(req.body?.token, 300);
     if (!/^https?:\/\//.test(baseUrl)) fail(400, 'Enter Halcyon\'s address, e.g. https://mail.example.com');
     if (!token) fail(400, 'Paste an assistant token from Halcyon → Settings → Assistants');
+    const ca = str(req.body?.tls?.ca, 20000).trim();
+    if (ca && !/-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----/.test(ca)) fail(400, 'Paste the certificate authority as PEM (-----BEGIN CERTIFICATE----- …)');
+    const t = req.body?.tls?.insecure ? { insecure: true } : ca ? { ca } : null;
     // Check before saving, so a typo shows up now rather than in the link picker.
-    await call({ baseUrl, token }, 'list_tasks', {});
-    await q(`INSERT INTO integrations (user_id, kind, base_url, token_enc, created_at) VALUES ($1, 'halcyon', $2, $3, $4)
-      ON CONFLICT (user_id, kind) DO UPDATE SET base_url = EXCLUDED.base_url, token_enc = EXCLUDED.token_enc`, req.user.id, baseUrl, encrypt(token), now());
-    return { connected: true, baseUrl };
+    await call({ baseUrl, token, tls: t }, 'list_tasks', {});
+    await q(`INSERT INTO integrations (user_id, kind, base_url, token_enc, settings_json, created_at) VALUES ($1, 'halcyon', $2, $3, $4::jsonb, $5)
+      ON CONFLICT (user_id, kind) DO UPDATE SET base_url = EXCLUDED.base_url, token_enc = EXCLUDED.token_enc,
+        settings_json = (integrations.settings_json - 'tls') || EXCLUDED.settings_json`, req.user.id, baseUrl, encrypt(token), JSON.stringify(t ? { tls: t } : {}), now());
+    return { connected: true, baseUrl, settings: (await connection(req.user.id)).settings };
   });
 
   app.delete('/api/integrations/halcyon', async (req) => {
