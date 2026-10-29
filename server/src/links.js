@@ -35,7 +35,38 @@ export default async function linkRoutes(app) {
     const n = await needNote(req.user.id, req.params.id, 'editor');
     const l = await addLink(req.user.id, n.id, req.body || {});
     publish(n.space_id, 'note:links', { noteId: n.id });
+    // A cross-link: the other page links back (when the user may edit it).
+    if (req.body?.kind === 'note' && req.body?.both) {
+      const other = await needNote(req.user.id, l.ref).catch(() => null);
+      if (other && ['owner', 'editor'].includes(other.role)) {
+        await addLink(req.user.id, other.id, { kind: 'note', ref: n.id, title: n.title });
+        publish(other.space_id, 'note:links', { noteId: other.id });
+      }
+    }
     return linkOut(l, await connection(req.user.id));
+  });
+
+  // Everything a page is connected to: pages it links/mentions, pages that link here, related pages (AI) and pages
+  // that name this one in their text without linking it yet.
+  app.get('/api/notes/:id/connections', async (req) => {
+    const n = await needNote(req.user.id, req.params.id);
+    const spaces = await userSpaceIds(req.user.id);
+    const card = 'n.id, n.title, n.icon, n.kind, n.space_id AS "spaceId", n.updated_at AS "updatedAt"';
+    const [out, back] = await Promise.all([
+      many(`SELECT DISTINCT ON (n.id) ${card}, l.kind AS via FROM note_links l JOIN notes n ON n.id::text = l.ref
+        WHERE l.note_id = $1 AND l.kind IN ('note', 'mention') AND n.deleted_at IS NULL AND n.space_id = ANY($2::uuid[]) ORDER BY n.id, l.kind DESC`, n.id, spaces),
+      many(`SELECT DISTINCT ON (n.id) ${card}, l.kind AS via FROM note_links l JOIN notes n ON n.id = l.note_id
+        WHERE l.ref = $1 AND l.kind IN ('note', 'mention') AND n.deleted_at IS NULL AND n.space_id = ANY($2::uuid[]) ORDER BY n.id, l.kind DESC`, n.id, spaces),
+    ]);
+    const linked = new Set([n.id, ...out.map((x) => x.id), ...back.map((x) => x.id)]);
+    const { related } = await import('./search.js');
+    const rel = (await related(req.user.id, n.id, 8)).filter((r) => !linked.has(r.id));
+    const title = (n.title || '').trim();
+    const unlinked = title.length >= 4 ? (await many(`SELECT ${card}, left(n.text_content, 4000) AS text FROM notes n
+      WHERE n.id <> $1 AND n.deleted_at IS NULL AND n.space_id = ANY($2::uuid[]) AND n.search @@ phraseto_tsquery('simple', $3)
+      ORDER BY n.updated_at DESC LIMIT 20`, n.id, spaces, title))
+      .filter((x) => !linked.has(x.id) && x.text.toLowerCase().includes(title.toLowerCase())).slice(0, 8).map(({ text, ...x }) => x) : [];
+    return { outgoing: out, backlinks: back, related: rel, unlinked };
   });
 
   app.delete('/api/notes/:id/links/:linkId', async (req) => {

@@ -52,7 +52,11 @@ function block(el, ctx) {
     case 'table': return `<table>${el.toArray().map((r) => `<tr>${r.toArray().map((c) => (c.nodeName === 'tableHeader' ? `<th>${kids(c, ctx)}</th>` : `<td>${kids(c, ctx)}</td>`)).join('')}</tr>`).join('')}</table>`;
     case 'inkBlock': {
       const strokes = strokesOf(ctx.doc, el.getAttribute('id'));
-      return strokes.length ? `<figure class="ink">${strokesToSvg(strokes, { height: Number(el.getAttribute('height')) || 240, background: '' })}</figure>` : '';
+      const h = Number(el.getAttribute('height')) || 240;
+      const bg = el.getAttribute('bg');
+      const svg = strokes.length ? strokesToSvg(strokes, { height: h, background: '' }) : '';
+      if (bg) return `<figure class="ink photo"><img src="${esc(ctx.asset(safeUrl(bg)))}" alt="">${svg ? `<div class="over">${svg}</div>` : ''}</figure>`;
+      return svg ? `<figure class="ink">${svg}</figure>` : '';
     }
     default: return el.toArray ? kids(el, ctx) : '';
   }
@@ -64,13 +68,15 @@ export function pageHtml(ydoc, { title, asset = (u) => u } = {}) {
   const page = strokesOf(ydoc, 'page');
   const boxes = [...ydoc.getMap('boxes').values()].map((b) => `<p>${esc(b.get?.('text')?.toString() || '')}</p>`).join('');
   const journal = page.length ? `<figure class="ink">${strokesToSvg(page, { background: '' })}</figure>` : '';
+  const over = strokesOf(ydoc, 'overlay');
+  const overlay = over.length ? `<figure class="ink"><figcaption>Handwritten on the page</figcaption>${strokesToSvg(over, { background: '' })}</figure>` : '';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title || 'Untitled')}</title><style>
 body{font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;max-width:760px;margin:40px auto;padding:0 16px;color:#1f2328;background:#fff}
 img,svg{max-width:100%;height:auto}pre{background:#f6f8fa;padding:12px;border-radius:6px;overflow:auto}code{font-family:ui-monospace,monospace}
 blockquote{border-left:3px solid #d0d7de;margin:0;padding-left:14px;color:#57606a}table{border-collapse:collapse}td,th{border:1px solid #d0d7de;padding:6px 10px}
 .callout{display:flex;gap:10px;background:#f6f8fa;border-radius:8px;padding:10px 14px}.tasks{list-style:none;padding-left:4px}mark{background:#fef08a}
-.mention{color:#4f46e5}figure.ink{margin:12px 0}@media(prefers-color-scheme:dark){body{background:#0d1117;color:#e6edf3}pre,.callout{background:#161b22}figure.ink{background:#fff;border-radius:8px}}
+.mention{color:#4f46e5}figure.ink{margin:12px 0}figure.photo{position:relative}figure.photo img{width:100%;display:block}figure.photo .over{position:absolute;inset:0}figure.photo .over svg{width:100%;height:auto}@media(prefers-color-scheme:dark){body{background:#0d1117;color:#e6edf3}pre,.callout{background:#161b22}figure.ink{background:#fff;border-radius:8px}}
 </style></head><body><h1>${esc(title || 'Untitled')}</h1>
-${body}${boxes}${journal}</body></html>`;
+${body}${boxes}${journal}${overlay}</body></html>`;
 }

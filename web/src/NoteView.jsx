@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye } from 'lucide-react';
+import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen } from 'lucide-react';
 import { get, post, put, patch, del } from './api.js';
 import { store, useStore, findNote, openNote, navigate, toast, toastError, localSet } from './store.js';
 import { openDoc, onEvent, loadFavorites, forgetDoc } from './data.js';
@@ -9,9 +9,11 @@ import { useYText } from './ui/ytext.js';
 import { Menu } from './ui/Menu.jsx';
 import { EmojiPicker } from './ui/EmojiPicker.jsx';
 import { RightPanel } from './RightPanel.jsx';
+import { TagBar, PenLayer, Connections } from './PageExtras.jsx';
 
 export function NoteView({ id }) {
   const user = useStore((s) => s.user);
+  const penLayer = useStore((s) => s.penLayer);
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
   const [handle, setHandle] = useState(null);
@@ -55,10 +57,16 @@ export function NoteView({ id }) {
       <div className="note-scroll" id="note-scroll">
         <div className={detail.kind === 'journal' ? 'journal-col' : 'page-col'}>
           <TitleRow detail={detail} setDetail={setDetail} doc={handle.doc} readOnly={readOnly} />
+          {ready && <TagBar detail={detail} doc={handle.doc} readOnly={readOnly} />}
           {detail.deletedAt && <div className="banner">This page is in the trash. <button onClick={() => post(`/api/notes/${id}/restore`).then(loadDetail).catch(toastError)}>Restore</button></div>}
           {!ready ? <div className="note-loading"><span className="spinner" /></div>
             : detail.kind === 'journal' ? <JournalView note={detail} doc={handle.doc} readOnly={readOnly} />
-              : <PageEditor key={id} note={detail} doc={handle.doc} provider={handle.provider} user={user} readOnly={readOnly} />}
+              : (
+                <PenLayer doc={handle.doc} on={penLayer} readOnly={readOnly}>
+                  <PageEditor key={id} note={detail} doc={handle.doc} provider={handle.provider} user={user} readOnly={readOnly} />
+                </PenLayer>
+              )}
+          {ready && <Connections detail={detail} readOnly={readOnly} />}
         </div>
       </div>
       <PanelHost detail={detail} reload={loadDetail} doc={handle.doc} />
@@ -110,8 +118,12 @@ function NoteHeader({ detail, setDetail, handle, readOnly }) {
       loadFavorites();
     } catch (e) { toastError(e); }
   };
+  const penLayer = useStore((s) => s.penLayer);
+  const child = async (kind) => openNote((await post('/api/notes', { spaceId: detail.spaceId, parentId: detail.id, kind })).id);
   const items = [
     { label: detail.favorite ? 'Remove from favourites' : 'Add to favourites', icon: Star, onClick: toggleFav },
+    { label: 'Add sub-page', icon: FilePlus2, onClick: () => child('page'), hidden: readOnly },
+    { label: 'Add sub-journal (handwriting)', icon: BookOpen, onClick: () => child('journal'), hidden: readOnly },
     { label: 'Duplicate', icon: Copy, onClick: async () => openNote((await post(`/api/notes/${detail.id}/duplicate`)).id), hidden: readOnly },
     { label: 'Move to space…', icon: FolderInput, hidden: readOnly, submenu: spaces.filter((s) => s.id !== detail.spaceId && ['owner', 'editor'].includes(s.role)).map((s) => ({ label: `${s.icon} ${s.name}`, onClick: async () => { await patch(`/api/notes/${detail.id}`, { spaceId: s.id }); store.set({ spaceId: s.id }); setDetail((d) => ({ ...d, spaceId: s.id })); toast(`Moved to ${s.name}`); } })) },
     { label: 'Export as Markdown', icon: Download, onClick: () => { location.href = `/api/notes/${detail.id}/export`; } },
@@ -137,6 +149,7 @@ function NoteHeader({ detail, setDetail, handle, readOnly }) {
         {!online && <span className="offline" title="Offline — changes are kept on this device and sync when you're back"><WifiOff size={15} /> Offline</span>}
         {readOnly && !detail.deletedAt && <span className="readonly" title="You can view this page"><Eye size={15} /> View only</span>}
         <Presence provider={handle.provider} />
+        {detail.kind === 'page' && !readOnly && <button className={`icon${penLayer ? ' on' : ''}`} onClick={() => store.set({ penLayer: !penLayer })} title="Write by hand on top of this page" aria-label="Pen on page"><PenLine size={18} /></button>}
         <button className={`icon${detail.favorite ? ' fav' : ''}`} onClick={toggleFav} title="Favourite" aria-label="Favourite"><Star size={18} /></button>
         <button className={`icon${panel === 'ai' ? ' on' : ''}`} onClick={() => setPanel('ai')} title="AI insights" aria-label="AI insights"><Sparkles size={18} /></button>
         <button className={`icon${panel === 'links' ? ' on' : ''}`} onClick={() => setPanel('links')} title="Links (mail, events, tasks, pages)" aria-label="Links"><Link2 size={18} /></button>

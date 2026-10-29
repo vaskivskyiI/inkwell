@@ -34,6 +34,11 @@ export const INLINE_ACTIONS = {
   outline: 'Write a structured outline (headings and bullets) for a page about this.',
   translate: 'Translate it into {target}. Keep the Markdown formatting.',
   cleanup: 'This is a transcription of handwritten notes. Turn it into clean, well-structured notes in Markdown (headings, lists, tasks), keeping all content and the language.',
+  nextsteps: 'Suggest concrete next steps that follow from this, as a Markdown task list ("- [ ] …"), most important first. Be specific to the content.',
+  brainstorm: 'Brainstorm fresh ideas that build on this, as a concise bullet list.',
+  questions: 'List the open questions, gaps and risks worth clarifying, as a bullet list.',
+  rewrite: 'Rewrite it to be clear and well structured (headings, lists where useful), keeping all facts and the language.',
+  write: 'Write new content for the page as asked: {instruction}\nFit the style, language and topic of the page. Use Markdown.',
   custom: '{instruction}',
 };
 

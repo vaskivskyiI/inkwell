@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "inkwell",
-      "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
+      "runtimeExecutable": "C:/Program Files/nodejs/node.exe",
       "runtimeArgs": ["--no-warnings", "server/src/index.js"],
       "env": { "INKWELL_DEMO": "1", "INKWELL_AI_DELAY": "3", "INKWELL_PORT": "8090" },
       "port": 8090

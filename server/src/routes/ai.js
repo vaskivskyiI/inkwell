@@ -136,10 +136,11 @@ export default async function aiRoutes(app) {
     if (!r) fail(409, 'No AI provider is configured — add one in Settings → AI');
     const instruction = INLINE_ACTIONS[action].replace('{target}', str(b.target, 40) || 'English').replace('{instruction}', str(b.instruction, 2000));
     const text = str(b.text, 30000) || context;
-    const user = [
-      context && b.text ? `Page context (for reference, do not repeat it):\n${context}\n` : '',
-      `${instruction}\n\n<text>\n${text}\n</text>`,
-    ].filter(Boolean).join('\n');
+    // Writing something new (or suggesting next steps) uses the page as background, not as text to transform.
+    const generative = ['write', 'nextsteps', 'brainstorm', 'questions'].includes(action) && !b.text;
+    const user = generative
+      ? `Page so far (context):\n${context || '(empty page)'}\n\n${instruction}`
+      : [context && b.text ? `Page context (for reference, do not repeat it):\n${context}\n` : '', `${instruction}\n\n<text>\n${text}\n</text>`].filter(Boolean).join('\n');
     return streamNdjson(reply, async ({ onToken, signal }) => {
       const out = await r.provider.chat({ model: r.model, system: inlineSystem(settings), messages: [{ role: 'user', content: user }], onToken, signal, temperature: action === 'continue' ? 0.7 : 0.3, maxTokens: 2500 });
       return { text: out.text.trim(), model: r.model };

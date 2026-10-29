@@ -90,7 +90,11 @@ function blockMd(el, ctx) {
       const id = el.getAttribute('id');
       ctx.inkIds?.add(id);
       const t = ctx.ink?.(id);
-      return t ? (ctx.plain ? t : `✍️ *(handwritten)*\n${prefixLines(t, '> ', '> ')}`) : (ctx.plain ? '' : '✍️ *(handwriting — not transcribed yet)*');
+      // An annotated photo: the picture under the ink.
+      const bg = el.getAttribute('bg');
+      const photo = bg ? imageMd({ getAttribute: (k) => (k === 'src' ? bg : k === 'alt' ? 'annotated photo' : null) }, ctx) : '';
+      const ink = t ? (ctx.plain ? t : `✍️ *(handwritten)*\n${prefixLines(t, '> ', '> ')}`) : (ctx.plain || bg ? '' : '✍️ *(handwriting — not transcribed yet)*');
+      return [photo, ink].filter(Boolean).join(ctx.plain ? '\n' : '\n\n');
     }
     default: return el.toArray ? blocksMd(el, ctx) : '';
   }
@@ -102,6 +106,14 @@ export function strokesOf(ydoc, canvasId) {
 }
 
 export const strokesHash = (strokes) => sha256(strokes.map((s) => s.id).join(','));
+
+export const WHOLE_PAGE_CANVASES = ['page', 'overlay'];
+
+/** Tags the user added by hand live in the doc (meta.tags, a Y.Array) so they sync like everything else. */
+export function manualTags(ydoc) {
+  const t = ydoc.getMap('meta').get('tags');
+  return (t instanceof Y.Array ? t.toArray() : []).map((x) => String(x).toLowerCase().trim()).filter(Boolean);
+}
 
 /**
  * Everything the server needs from a page: title, Markdown (for AI/export), plain text (search), ink canvases,
@@ -118,15 +130,16 @@ export function extract(ydoc, { recognitions = {}, assetText } = {}) {
   const canvases = [...inkMap.keys()].map((id) => {
     const strokes = strokesOf(ydoc, id);
     return { id, strokes, hash: strokesHash(strokes) };
-  }).filter((c) => c.strokes.length && (c.id === 'page' || ctxBase.inkIds.has(c.id)));
-  const pageInk = recognitions.page ? `✍️ *(handwritten page)*\n${recognitions.page}` : '';
-  const fullMd = [markdown, boxes.join('\n\n'), pageInk].filter(Boolean).join('\n\n');
-  const fullText = [text, boxes.join('\n'), recognitions.page || ''].filter(Boolean).join('\n');
-  const tags = [...new Set([...fullText.matchAll(/(?:^|\s)#([\p{L}\p{N}_-]{2,40})/gu)].map((m) => m[1].toLowerCase()))];
+  }).filter((c) => c.strokes.length && (WHOLE_PAGE_CANVASES.includes(c.id) || ctxBase.inkIds.has(c.id)));
+  // `page`: a journal's paper; `overlay`: handwriting on top of a typed page.
+  const pageInk = WHOLE_PAGE_CANVASES.filter((id) => recognitions[id]).map((id) => `✍️ *(handwritten ${id === 'page' ? 'page' : 'notes on the page'})*\n${recognitions[id]}`);
+  const fullMd = [markdown, boxes.join('\n\n'), ...pageInk].filter(Boolean).join('\n\n');
+  const fullText = [text, boxes.join('\n'), ...WHOLE_PAGE_CANVASES.map((id) => recognitions[id] || '')].filter(Boolean).join('\n');
+  const tags = [...new Set([...manualTags(ydoc), ...[...fullText.matchAll(/(?:^|\s)#([\p{L}\p{N}_-]{2,40})/gu)].map((m) => m[1].toLowerCase())])];
   return {
     title, markdown: fullMd, text: fullText, tags, canvases,
     assets: [...ctxBase.assets], mentions: [...ctxBase.mentions].filter(Boolean),
-    hash: sha256(`${title}\n${fullMd}\n${canvases.map((c) => c.hash).join(',')}`),
+    hash: sha256(`${title}\n${fullMd}\n${tags.join(',')}\n${canvases.map((c) => c.hash).join(',')}`),
   };
 }
 

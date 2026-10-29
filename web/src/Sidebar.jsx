@@ -133,6 +133,7 @@ function TreeNode({ note, childrenMap, depth, activeId, canEdit }) {
 
   const items = [
     { label: 'Add sub-page', icon: Plus, onClick: () => newPage({ parentId: note.id }) },
+    { label: 'Add sub-journal (handwriting)', icon: PenLine, onClick: () => newPage({ parentId: note.id, kind: 'journal' }) },
     { label: 'Duplicate', icon: Copy, onClick: async () => openNote((await post(`/api/notes/${note.id}/duplicate`)).id) },
     { label: 'Move to trash', icon: Trash2, danger: true, onClick: async () => { await del(`/api/notes/${note.id}`); forgetDoc(note.id); toast('Moved to the trash', { action: { label: 'Undo', onClick: () => post(`/api/notes/${note.id}/restore`) } }); if (activeId === note.id) navigate('#/'); } },
   ];

@@ -11,7 +11,8 @@ export const InkBlock = Node.create({
   draggable: true,
   selectable: true,
   addOptions: () => ({ doc: null, noteId: null }),
-  addAttributes: () => ({ id: { default: null }, height: { default: 240 } }),
+  // bg: an uploaded photo/image to draw on (annotation); the block keeps the picture's aspect ratio.
+  addAttributes: () => ({ id: { default: null }, height: { default: 240 }, bg: { default: null } }),
   parseHTML: () => [{ tag: 'div[data-ink-block]' }],
   renderHTML: ({ HTMLAttributes }) => ['div', mergeAttributes(HTMLAttributes, { 'data-ink-block': '' })],
   addNodeView() {

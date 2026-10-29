@@ -37,9 +37,9 @@ export function InkBlockView({ node, updateAttributes, editor, extension, delete
         <span className="drag" data-drag-handle draggable="true" title="Drag to move"><GripVertical size={15} /></span>
         <InkToolbar canvas={canvas} compact onTranscribe={transcribe} onDeleteBlock={deleteNode} />
       </div>}
-      <InkCanvas ref={canvas} doc={doc} canvasId={node.attrs.id} height={node.attrs.height} minHeight={120} readOnly={!editable}
-        onHeightChange={(h) => updateAttributes({ height: h })} paper="plain" />
-      {editable && <div className="ink-resize" onPointerDown={onResizeDown} onPointerMove={onResizeMove} onPointerUp={() => setDrag(null)} title="Drag to resize" />}
+      <InkCanvas ref={canvas} doc={doc} canvasId={node.attrs.id} height={node.attrs.height} minHeight={node.attrs.bg ? 40 : 120} readOnly={!editable}
+        onHeightChange={node.attrs.bg ? undefined : (h) => updateAttributes({ height: h })} paper="plain" background={node.attrs.bg} />
+      {editable && !node.attrs.bg && <div className="ink-resize" onPointerDown={onResizeDown} onPointerMove={onResizeMove} onPointerUp={() => setDrag(null)} title="Drag to resize" />}
       {rec?.text && (
         <div className="ink-transcript" contentEditable={false}>
           <Sparkles size={13} /> <span className="t">{rec.text.replace(/^\s*- \[[ xX]\]\s*/gm, '☐ ').replace(/^#+\s*/gm, '').replace(/[*_]{1,2}/g, '')}</span>

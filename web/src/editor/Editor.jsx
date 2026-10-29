@@ -18,14 +18,41 @@ import { SLASH, AI_ACTIONS, matchSlash } from './commands.js';
 import { post, stream, upload } from '../api.js';
 import { store, openNote, toast, toastError } from '../store.js';
 import { Markdown } from '../ui/Markdown.jsx';
+import { sid } from '../ink/geometry.js';
 
 const looksLikeMarkdown = (t) => /(^|\n)(#{1,6} |[-*+] |\d+\. |```|> |\|.*\|)/.test(t);
 
 export function PageEditor({ note, doc, provider, user, readOnly }) {
   const capture = useRef(null);
   const fileInput = useRef(null);
+  const photoInput = useRef(null);
   const [trigger, setTrigger] = useState(null); // { type: 'slash'|'mention', from, query, coords }
   const [ai, setAi] = useState(null);
+
+  // A photo (camera on phones) becomes a drawing block with the picture underneath, in the picture's proportions.
+  async function insertPhoto(file) {
+    try {
+      const size = await new Promise((res) => {
+        const url = URL.createObjectURL(file);
+        const img = new window.Image();
+        img.onload = () => { res({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(url); };
+        img.onerror = () => { res({ w: 4, h: 3 }); URL.revokeObjectURL(url); };
+        img.src = url;
+      });
+      const a = await upload(file, { noteId: note.id });
+      const height = Math.min(4000, Math.max(80, Math.round((1000 * size.h) / size.w)));
+      editorRef.current.chain().focus().insertContent([{ type: 'inkBlock', attrs: { id: sid(), height, bg: a.url } }, { type: 'paragraph' }]).run();
+    } catch (err) { toastError(err); }
+  }
+
+  // A child page or journal of this page, linked from where the cursor is.
+  async function subpage(kind) {
+    try {
+      const n = await post('/api/notes', { spaceId: note.spaceId, parentId: note.id, kind, title: kind === 'journal' ? 'Sketches' : '' });
+      editorRef.current.chain().focus().insertContent([{ type: 'pageMention', attrs: { id: n.id, title: n.title || 'Untitled' } }, { type: 'text', text: ' ' }]).run();
+      toast(kind === 'journal' ? 'Sub-journal created — click the link to draw' : 'Sub-page created', { action: { label: 'Open', onClick: () => openNote(n.id) } });
+    } catch (err) { toastError(err); }
+  }
 
   const editor = useEditor({
     extensions: [
@@ -101,19 +128,25 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
   }
 
   // ---- AI
+  const LABELS = { write: 'Write with AI', continue: 'Continue writing', outline: 'Outline' };
   const runAi = async (action, opts = {}) => {
     const e = editorRef.current;
     const { from, to, empty } = e.state.selection;
-    const range = opts.wholePage || empty ? null : { from, to };
-    let target = '', instruction = '';
-    if (opts.ask || action === 'translate' || action === 'custom') {
-      const answer = window.prompt(opts.ask || (action === 'translate' ? 'Translate into which language?' : 'What should AI do with it?'), action === 'translate' ? 'English' : '');
-      if (!answer) return;
-      if (action === 'translate') target = answer; else instruction = answer;
+    // The selection is remembered when AI first asks a question, so typing the answer elsewhere does not lose it.
+    const range = opts.range !== undefined ? opts.range : opts.wholePage || empty ? null : { from, to };
+    const label = LABELS[action] || AI_ACTIONS.find((a) => a[0] === action)?.[1]?.replace('…', '') || action;
+    const needsInput = opts.ask || action === 'translate' || action === 'custom' || action === 'write';
+    if (needsInput && opts.input === undefined) {
+      setAi({ action, label, asking: opts.ask || (action === 'translate' ? 'Translate into which language?' : 'What should AI do with it?'),
+        placeholder: action === 'translate' ? 'e.g. English, Slovenian, German' : action === 'write' ? 'e.g. an intro paragraph about the project goals' : 'Your instruction',
+        opts: { ...opts, range, insertAt: range ? range.to : to } });
+      return;
     }
-    const text = opts.titleOnly ? doc.getText('title').toString() : range ? e.state.doc.textBetween(from, to, '\n\n', '￼') : '';
-    const at = range ? range.to : e.state.selection.to;
-    const state = { action, label: AI_ACTIONS.find((a) => a[0] === action)?.[1] || action, range, insertAt: at, result: '', busy: true, error: null, target, instruction, text };
+    let target = '', instruction = '';
+    if (needsInput) { if (action === 'translate') target = opts.input; else instruction = opts.input; }
+    const text = opts.titleOnly ? doc.getText('title').toString() : range ? e.state.doc.textBetween(range.from, range.to, '\n\n', '￼') : '';
+    const at = opts.insertAt ?? (range ? range.to : e.state.selection.to);
+    const state = { action, label, opts, range, insertAt: at, result: '', busy: true, error: null, target, instruction, text };
     setAi(state);
     const ctl = new AbortController();
     state.ctl = ctl;
@@ -155,7 +188,7 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
     const t = trigger;
     setTrigger(null);
     e.chain().focus().deleteRange({ from: t.from, to: e.state.selection.from }).run();
-    if (t.type === 'slash') item.run(e, { pickFile: () => fileInput.current?.click(), ai: runAi });
+    if (t.type === 'slash') item.run(e, { pickFile: () => fileInput.current?.click(), pickPhoto: () => photoInput.current?.click(), ai: runAi, subpage });
     else {
       let target = item;
       if (item.create) {
@@ -184,6 +217,8 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
     <div className="editor-wrap">
       <EditorContent editor={editor} />
       <input ref={fileInput} type="file" hidden multiple onChange={(e) => { [...e.target.files].forEach((f) => insertFile(f)); e.target.value = ''; }} />
+      {/* On phones `capture` opens the camera directly; on desktops it is a normal image picker. */}
+      <input ref={photoInput} type="file" hidden accept="image/*" capture="environment" onChange={(e) => { const f = e.target.files[0]; if (f) insertPhoto(f); e.target.value = ''; }} />
       {!readOnly && <BubbleMenu editor={editor} options={{ placement: 'top' }} shouldShow={({ editor: e, state }) => !state.selection.empty && e.isEditable && !e.isActive('inkBlock') && !e.isActive('image')}>
         <FormatBar editor={editor} onAi={runAi} />
       </BubbleMenu>}
@@ -200,7 +235,9 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
           })}
         </div>
       )}
-      {ai && <AiCard ai={ai} onClose={() => { ai.ctl?.abort(); setAi(null); }} onApply={applyAi} onRetry={() => runAi(ai.action, { wholePage: !ai.range })} />}
+      {ai && <AiCard ai={ai} onClose={() => { ai.ctl?.abort(); setAi(null); editorRef.current?.commands.focus(); }} onApply={applyAi}
+        onRetry={() => runAi(ai.action, { ...ai.opts, range: ai.range, insertAt: ai.insertAt, input: ai.opts?.input })}
+        onAnswer={(input) => runAi(ai.action, { ...ai.opts, input })} />}
     </div>
   );
 }
@@ -236,10 +273,23 @@ function FormatBar({ editor, onAi }) {
   );
 }
 
-function AiCard({ ai, onClose, onApply, onRetry }) {
+function AiCard({ ai, onClose, onApply, onRetry, onAnswer }) {
+  const [input, setInput] = useState('');
+  if (ai.asking) {
+    return (
+      <div className="ai-card" role="dialog" aria-label={ai.label}>
+        <div className="ai-card-head"><Sparkles size={15} /> <b>{ai.label}</b><button className="icon" onClick={onClose} aria-label="Close"><X size={16} /></button></div>
+        <form className="ai-ask" onSubmit={(e) => { e.preventDefault(); if (input.trim()) onAnswer(input.trim()); }}>
+          <input autoFocus value={input} onChange={(e) => setInput(e.target.value)} placeholder={ai.placeholder} aria-label={ai.asking}
+            onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }} />
+          <button className="primary" disabled={!input.trim()}><Sparkles size={14} /> Go</button>
+        </form>
+      </div>
+    );
+  }
   return (
     <div className="ai-card" role="dialog" aria-label="AI result">
-      <div className="ai-card-head"><Sparkles size={15} /> <b>{ai.label}</b>{ai.target ? ` → ${ai.target}` : ''}{ai.busy && <span className="spinner" />}
+      <div className="ai-card-head"><Sparkles size={15} /> <b>{ai.label}</b>{ai.target ? ` → ${ai.target}` : ''}{ai.instruction ? <span className="muted small"> · {ai.instruction.slice(0, 60)}</span> : ''}{ai.busy && <span className="spinner" />}
         <button className="icon" onClick={onClose} aria-label="Close"><X size={16} /></button></div>
       <div className="ai-card-body">{ai.error ? <p className="error">{ai.error}</p> : <Markdown text={ai.result || '…'} />}</div>
       {!ai.busy && !ai.error && (
