@@ -155,7 +155,8 @@ function Today({ highlight }) {
   const open = async (it) => {
     const id = notes[`${it.kind}:${it.ref}`];
     if (id) { openNote(id); return; }
-    try { openNote((await noteForItem(it.kind, it.ref, it.title, it.meta)).id); } catch (e) { toastError(e); }
+    const meta = it.kind === 'event' ? { ...it.meta, day: it.meta.allDay ? it.meta.start.slice(0, 10) : localDay(new Date(it.meta.start)) } : it.meta;
+    try { openNote((await noteForItem(it.kind, it.ref, it.title, meta)).id); } catch (e) { toastError(e); }
   };
   const ext = (it) => `${halcyon.baseUrl}/#/${it.kind === 'email' ? `mail/unified/${it.ref}` : it.kind === 'event' ? 'calendar' : 'tasks'}`;
   const row = (it, when, late, sub) => (

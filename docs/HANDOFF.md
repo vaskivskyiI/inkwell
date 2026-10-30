@@ -15,7 +15,7 @@ MCP endpoint (no Halcyon changes needed for the Inkwell → Halcyon direction).
 
 ## 2. State
 - 3 commits. Server + web UI implement everything in docs/PLAN.md §2 except the roadmap items.
-- Tests: `npm test` 50/50 (incl. AFFiNE snapshot and Markdown-zip import) (unit, API, real-WebSocket collaboration, AI with mock provider, fake Halcyon MCP).
+- Tests: `npm test` 51/51 (incl. AFFiNE snapshot and Markdown-zip import) (unit, API, real-WebSocket collaboration, AI with mock provider, fake Halcyon MCP).
   `npm run test:pg -w server`: API 12/12 + AI 7/7 through the production `pg` driver (PGlite wire server).
 - UI checked in the desktop app's browser: sign-up, home, editor (collab load, slash menu, ink block, drawing),
   background handwriting recognition shown under the ink, AI panel (summary, tags, action items, handwriting),

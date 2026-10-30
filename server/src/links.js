@@ -28,6 +28,8 @@ export async function addLink(userId, noteId, { kind, ref, title, meta }) {
 }
 
 const dateOf = (d) => (d ? localStamp(d).slice(0, 10) : null);
+// The day of a linked event: as the client saw it (`day`, its own time zone), else from the start in the server's zone.
+const dayOf = (meta) => (/^\d{4}-\d{2}-\d{2}$/.test(meta?.day || '') ? meta.day : dateOf(meta?.start));
 
 /** The user's writable space for a Halcyon space label (explicit association, else the same name), or null. */
 async function spaceForLabel(userId, label) {
@@ -51,7 +53,7 @@ export async function noteFromItem(userId, b) {
   const spaces = await userSpaceIds(userId);
   const linked = await many(`SELECT n.*, l.meta_json AS link_meta FROM note_links l JOIN notes n ON n.id = l.note_id
     WHERE l.kind = $1 AND l.ref = $2 AND n.space_id = ANY($3::uuid[]) AND n.deleted_at IS NULL ORDER BY n.created_at DESC`, kind, ref, spaces);
-  const same = kind === 'event' && meta.start ? linked.find((n) => dateOf(n.link_meta?.start) === dateOf(meta.start)) : linked[0];
+  const same = kind === 'event' && dayOf(meta) ? linked.find((n) => dayOf(n.link_meta) === dayOf(meta)) : linked[0];
   if (same) return { ...noteOut(same), existing: true };
 
   const writable = async (id) => isUuid(id) && spaces.includes(id) && !!(await one("SELECT 1 FROM space_members WHERE space_id = $1 AND user_id = $2 AND role IN ('owner', 'editor')", id, userId));
@@ -78,7 +80,7 @@ export async function noteFromItem(userId, b) {
   if (kind === 'event') {
     icon = '🗓️';
     meta.attendees = attendees;
-    noteTitle = `${title || 'Meeting'} ${dateOf(meta.start || Date.now())}`;
+    noteTitle = `${title || 'Meeting'} ${dayOf(meta) || dateOf(Date.now())}`;
     md = TEMPLATES.meeting.md.replace('{{date}}', stamp(meta.start))
       .replace('**Attendees:** ', `${meta.location ? `**Where:** ${meta.location}  \n` : ''}**Attendees:** ${attendees.join(', ')}`);
     const prev = title ? await one(`SELECT n.id, n.title, n.ydoc FROM note_links l JOIN notes n ON n.id = l.note_id
@@ -163,7 +165,7 @@ export default async function linkRoutes(app) {
     const base = config.publicUrl;
     return (await many(`SELECT l.ref, l.meta_json, n.id, n.title, n.icon, n.kind, n.updated_at, left(n.text_content, 200) AS snippet FROM note_links l JOIN notes n ON n.id = l.note_id
       WHERE l.kind = $1 AND l.ref = ANY($2::text[]) AND n.deleted_at IS NULL AND n.space_id = ANY($3::uuid[]) ORDER BY n.updated_at DESC`, kind, refs, await userSpaceIds(req.user.id)))
-      .map((r) => ({ ref: r.ref, id: r.id, title: r.title, icon: r.icon, kind: r.kind, updatedAt: r.updated_at, snippet: r.snippet, url: `${base}/#/n/${r.id}`, date: dateOf(r.meta_json?.start) }));
+      .map((r) => ({ ref: r.ref, id: r.id, title: r.title, icon: r.icon, kind: r.kind, updatedAt: r.updated_at, snippet: r.snippet, url: `${base}/#/n/${r.id}`, date: dayOf(r.meta_json) }));
   });
 
   // "New meeting note" from a Halcyon event object (older clients; the app uses from-item).

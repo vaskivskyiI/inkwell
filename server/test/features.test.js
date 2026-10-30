@@ -119,3 +119,12 @@ test('a Halcyon space label puts the note in the associated space', async () => 
   const none = await ann.post('/api/notes/from-item', { kind: 'task', ref: '702', title: 'C', spaceId: work(), meta: { hspace: 'Unknown' } });
   assert.equal(none.spaceId, work(), 'no match: the current space');
 });
+
+test('the client\'s day decides which occurrence a note belongs to', async () => {
+  // 23:30 UTC on the 5th is already the 6th for a user east of Greenwich.
+  const a = await ann.post('/api/notes/from-item', { kind: 'event', ref: '800', title: 'Late call', spaceId: work(), meta: { start: '2026-10-05T23:30:00Z', day: '2026-10-06' } });
+  assert.match(a.title, /2026-10-06$/);
+  assert.equal((await ann.get('/api/links/lookup?kind=event&ref=800'))[0].date, '2026-10-06');
+  const again = await ann.post('/api/notes/from-item', { kind: 'event', ref: '800', title: 'Late call', meta: { start: '2026-10-05T23:45:00Z', day: '2026-10-06' } });
+  assert.equal(again.id, a.id);
+});
