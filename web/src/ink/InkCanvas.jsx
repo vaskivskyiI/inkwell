@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useRef, useState, forwardRef, useImperative
 import * as Y from 'yjs';
 import { CANVAS_WIDTH, TOOLS, outline, path2d, hits, strokeInLasso, bounds, sid } from './geometry.js';
 import { recognize, eraseFromStroke } from './shapes.js';
+import { keepKeyboardAway } from './keyboard.js';
 import { useStore, store } from '../store.js';
 
 const LOCAL = { local: true };
@@ -218,6 +219,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
 
   function onDown(e) {
     if (e.pointerType === 'pen') penSeen = true;
+    keepKeyboardAway();
     if (e.pointerType === 'touch') {
       touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (zoomable && touches.current.size === 2) { e.preventDefault(); startPinch(); return; }
@@ -232,6 +234,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     }
     if (e.button === 2) return;
     e.preventDefault();
+    wrap.current?.focus({ preventScroll: true }); // keys (undo, tools) work here, and no text has focus
     live.current.setPointerCapture(e.pointerId);
     const p = pt(e);
     const eraser = e.button === 5 || (e.buttons & 32) || tool.tool === 'eraser';

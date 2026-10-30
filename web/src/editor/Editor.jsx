@@ -19,6 +19,7 @@ import { get, post, stream, upload } from '../api.js';
 import { store, useStore, navigate, openNote, toast, toastError } from '../store.js';
 import { Markdown } from '../ui/Markdown.jsx';
 import { sid } from '../ink/geometry.js';
+import { allowKeyboard } from '../ink/keyboard.js';
 
 const looksLikeMarkdown = (t) => /(^|\n)(#{1,6} |[-*+] |\d+\. |```|> |\|.*\|)/.test(t);
 
@@ -129,6 +130,8 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
       },
       // A pen near a picture makes it drawable right away.
       handleDOMEvents: {
+        // Touching text (not a canvas in the page) brings the on-screen keyboard back.
+        pointerdown: (view, e) => { if (!e.target.closest?.('.ink-block, .audio-block')) allowKeyboard(view.dom); return false; },
         pointerover: (view, e) => {
           if (e.pointerType !== 'pen' || e.target.tagName !== 'IMG' || !view.editable) return false;
           const pos = view.posAtDOM(e.target, 0);
