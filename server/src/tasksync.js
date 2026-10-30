@@ -54,7 +54,8 @@ export async function pullTasks(user) {
     if (!t) continue;
     const m = l.meta_json || {};
     let done = !!t.done;
-    if (t.repeats || m.repeats) {
+    // A repeating task's last occurrence ends as plain done.
+    if ((t.repeats || m.repeats) && !t.done) {
       const moved = m.seenDue !== undefined && (t.due ?? null) !== m.seenDue;
       if (moved || m.seenDue === undefined || !m.repeats) await setMeta(l, { repeats: true, seenDue: t.due ?? null, ...(moved ? { done: true } : {}) });
       if (!moved || m.done) continue;
