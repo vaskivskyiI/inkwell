@@ -29,3 +29,26 @@ export async function toggleFullscreen(el, onChange) {
   document.addEventListener('keydown', esc);
   onChange?.(true);
 }
+
+/**
+ * Full screen for a canvas: the page's header stays on top, everything else but the canvas goes away.
+ * Data attributes, not classes: React rewrites class names of these elements when it re-renders.
+ */
+export function toggleCanvasFullscreen(canvas, onChange) {
+  const view = canvas?.closest('.note-view');
+  if (!view) return;
+  const off = () => { delete view.dataset.canvasFull; delete canvas.dataset.canvasTarget; };
+  const wasOn = isFullscreen(view);
+  if (wasOn) off();
+  else { view.dataset.canvasFull = '1'; canvas.dataset.canvasTarget = '1'; }
+  toggleFullscreen(view, (on) => { if (!on) off(); onChange?.(on); });
+}
+
+/** The canvas a page really is: a journal's paper, or its only drawing. Null when it has more content. */
+export function pageCanvas(view) {
+  const journal = view.querySelector('.journal');
+  if (journal) return journal;
+  const pm = view.querySelector('.ProseMirror');
+  const full = [...(pm?.children || [])].filter((c) => c.textContent.trim() || c.querySelector('img, canvas, audio, table, hr'));
+  return full.length === 1 ? full[0].querySelector('.ink-block') : null;
+}

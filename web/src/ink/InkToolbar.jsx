@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { toggleFullscreen } from '../ui/fullscreen.js';
+import { toggleCanvasFullscreen } from '../ui/fullscreen.js';
 import { PenLine, Highlighter, Eraser, Lasso, Type, Undo2, Redo2, Trash2, ScanText, Shapes, ZoomIn, ZoomOut, Scissors, Maximize2, Minimize2 } from 'lucide-react';
 import { useStore, store, localSet } from '../store.js';
 
@@ -69,6 +69,6 @@ export function FullscreenButton({ selector }) {
   const Icon = fs ? Minimize2 : Maximize2;
   return (
     <button className={fs ? 'on' : ''} title={fs ? 'Exit full screen (Esc)' : 'Full screen'} aria-label={fs ? 'Exit full screen' : 'Full screen'}
-      onClick={(e) => toggleFullscreen(e.currentTarget.closest(selector), setFs)}><Icon size={17} /></button>
+      onClick={(e) => toggleCanvasFullscreen(e.currentTarget.closest(selector), setFs)}><Icon size={17} /></button>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2, MoveHorizontal, MessagesSquare } from 'lucide-react';
-import { toggleFullscreen } from './ui/fullscreen.js';
+import { toggleFullscreen, toggleCanvasFullscreen, pageCanvas } from './ui/fullscreen.js';
 import { get, post, put, patch, del } from './api.js';
 import { store, useStore, findNote, openNote, navigate, toast, toastError, localSet } from './store.js';
 import { openDoc, onEvent, loadFavorites, forgetDoc } from './data.js';
@@ -169,7 +169,7 @@ function NoteHeader({ detail, setDetail, handle, readOnly, wide }) {
         {readOnly && !detail.deletedAt && <span className="readonly" title="You can view this page"><Eye size={15} /> View only</span>}
         <Presence provider={handle.provider} />
         {detail.kind === 'page' && <button className={`icon${wide ? ' on' : ''}`} onClick={() => handle.doc.getMap('meta').set('wide', !wide)} title={wide ? 'Fixed width' : 'Full width'} aria-label={wide ? 'Fixed width' : 'Full width'}><MoveHorizontal size={18} /></button>}
-        <button className="icon" onClick={(e) => toggleFullscreen(e.currentTarget.closest('.note-view'))} title="Full screen" aria-label="Full screen"><Maximize2 size={18} /></button>
+        <button className="icon" onClick={(e) => { const view = e.currentTarget.closest('.note-view'); const canvas = pageCanvas(view); if (canvas || view.dataset.canvasFull) toggleCanvasFullscreen(canvas || view.querySelector('[data-canvas-target]')); else toggleFullscreen(view); }} title="Full screen" aria-label="Full screen"><Maximize2 size={18} /></button>
         {detail.kind === 'page' && !readOnly && <button className={`icon${penLayer ? ' on' : ''}`} onClick={() => store.set({ penLayer: !penLayer })} title="Write by hand on top of this page" aria-label="Pen on page"><PenLine size={18} /></button>}
         <button className={`icon${detail.favorite ? ' fav' : ''}`} onClick={toggleFav} title="Favourite" aria-label="Favourite"><Star size={18} /></button>
         <button className={`icon${panel === 'ai' ? ' on' : ''}`} onClick={() => setPanel('ai')} title="AI insights" aria-label="AI insights"><Sparkles size={18} /></button>
