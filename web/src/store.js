@@ -17,6 +17,7 @@ let state = {
   toasts: [],
   online: true,
   halcyon: null,
+  commentQuote: '',    // passage a new comment is about
   penLayer: false,     // handwriting on top of the open typed page
   inkText: {},         // noteId → canvasId → { text, data } (handwriting read by AI)
   inkTool: JSON.parse(localGet('inkTool') || 'null') || { tool: 'pen', color: '#1f2937', width: 3 },

@@ -1,10 +1,11 @@
 import { useEffect, useState, useRef } from 'react';
 import { X, RefreshCw, Sparkles, ListTodo, Send, Mail, CalendarDays, CheckSquare, User, FileText, Globe, Trash2, ExternalLink, PenLine, ArrowRight, RotateCcw } from 'lucide-react';
-import { get, post, del, stream } from './api.js';
+import { get, post, patch, del, stream } from './api.js';
+import { onEvent } from './data.js';
 import { store, useStore, openNote, navigate, toast, toastError, localSet } from './store.js';
 import { Markdown } from './ui/Markdown.jsx';
 
-const TITLES = { ai: 'AI insights', links: 'Links', ask: 'Ask Inkwell', history: 'Version history' };
+const TITLES = { ai: 'AI insights', links: 'Links', ask: 'Ask Inkwell', history: 'Version history', comments: 'Comments' };
 
 export function RightPanel({ panel, detail, reload }) {
   const close = () => { store.set({ panel: '' }); localSet('panel', ''); };
@@ -16,6 +17,7 @@ export function RightPanel({ panel, detail, reload }) {
         {panel === 'links' && <LinksTab detail={detail} reload={reload} />}
         {panel === 'ask' && <AskTab detail={detail} />}
         {panel === 'history' && <HistoryTab detail={detail} />}
+        {panel === 'comments' && <CommentsTab detail={detail} />}
       </div>
     </aside>
   );
@@ -228,6 +230,63 @@ export function AskTab({ detail, standalone = false }) {
         <textarea rows={2} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask your notes…" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
         <button className="primary" onClick={send} disabled={busy || !q.trim()} aria-label="Send">{busy ? <span className="spinner" /> : <Send size={16} />}</button>
       </div>
+    </div>
+  );
+}
+
+function CommentsTab({ detail }) {
+  const quote = useStore((s) => s.commentQuote);
+  const user = useStore((s) => s.user);
+  const [list, setList] = useState(null);
+  const [members, setMembers] = useState([]);
+  const [body, setBody] = useState('');
+  const [reply, setReply] = useState(null);
+  const [showDone, setShowDone] = useState(false);
+  const canPost = ['owner', 'editor', 'commenter'].includes(detail.role);
+  const canManage = ['owner', 'editor'].includes(detail.role);
+  const load = () => get(`/api/notes/${detail.id}/comments`).then(setList).catch(toastError);
+  useEffect(() => {
+    load();
+    get(`/api/spaces/${detail.spaceId}/members`).then(setMembers).catch(() => {});
+    return onEvent((m) => { if (m.type === 'note:comments' && m.noteId === detail.id) load(); });
+  }, [detail.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const send = async () => {
+    await post(`/api/notes/${detail.id}/comments`, { body, quote: reply ? '' : quote || '', parentId: reply });
+    setBody(''); setReply(null); store.set({ commentQuote: '' }); load();
+  };
+  if (!list) return <span className="spinner" />;
+  const tops = list.filter((c) => !c.parentId && (showDone || !c.resolved));
+  const done = list.filter((c) => !c.parentId && c.resolved).length;
+  const others = members.filter((m) => m.id !== user.id);
+  return (
+    <div className="comments-tab">
+      {!tops.length && <p className="muted">No comments yet. Right-click a block and choose Comment, or write here. Use @name to tell someone.</p>}
+      {tops.map((c) => (
+        <div key={c.id} className="comment">
+          {c.quote && <blockquote>{c.quote}</blockquote>}
+          {[c, ...list.filter((r) => r.parentId === c.id)].map((m) => (
+            <div key={m.id} className="comment-msg">
+              <div className="row"><span className="avatar" style={{ background: m.color || '#8a93a3' }}>{(m.author || '?')[0]}</span><b>{m.author || 'Former member'}</b><span className="muted small">{new Date(m.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span></div>
+              <p>{m.body}</p>
+            </div>
+          ))}
+          <div className="row">
+            {canPost && <button className="link" onClick={() => setReply(c.id)}>Reply</button>}
+            {(canManage || c.userId === user.id) && <button className="link" onClick={() => patch(`/api/comments/${c.id}`, { resolved: !c.resolved }).then(load).catch(toastError)}>{c.resolved ? 'Reopen' : 'Resolve'}</button>}
+            {(canManage || c.userId === user.id) && <button className="link" onClick={() => del(`/api/comments/${c.id}`).then(load).catch(toastError)}>Delete</button>}
+          </div>
+        </div>
+      ))}
+      {done > 0 && <button className="link" onClick={() => setShowDone(!showDone)}>{showDone ? 'Hide resolved' : `Show ${done} resolved`}</button>}
+      {canPost && (
+        <div className="comment-new">
+          {quote && !reply && <blockquote>{quote}</blockquote>}
+          {reply && <p className="muted small">Replying <button className="link" onClick={() => setReply(null)}>cancel</button></p>}
+          <textarea rows={3} value={body} placeholder="Comment… @name notifies them" onChange={(e) => setBody(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && body.trim()) send().catch(toastError); }} />
+          {others.length > 0 && <div className="chips">{others.slice(0, 8).map((m) => <button key={m.id} className="chip" onClick={() => setBody((b) => `${b}${b && !b.endsWith(' ') ? ' ' : ''}@${m.name.toLowerCase().split(/\s+/)[0]} `)}>@{m.name}</button>)}</div>}
+          <button className="primary" disabled={!body.trim()} onClick={() => send().catch(toastError)}>Send</button>
+        </div>
+      )}
     </div>
   );
 }

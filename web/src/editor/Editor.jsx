@@ -12,7 +12,7 @@ import { TextStyle, Color } from '@tiptap/extension-text-style';
 import { TableKit } from '@tiptap/extension-table';
 import Typography from '@tiptap/extension-typography';
 import { Bold, Italic, Underline, Strikethrough, Code, Link2, Highlighter, Sparkles, ChevronDown, Check, X, RotateCcw, ClipboardCopy, CornerDownLeft, Replace } from 'lucide-react';
-import { InkBlock, Callout, PageMention, KeyCapture, SizedImage, HeadingFold, imageToInk, unfoldAll } from './extensions.js';
+import { InkBlock, AudioBlock, Callout, PageMention, KeyCapture, SizedImage, HeadingFold, imageToInk, unfoldAll } from './extensions.js';
 import { BlockTools } from './BlockTools.jsx';
 import { SLASH, AI_ACTIONS, matchSlash } from './commands.js';
 import { get, post, stream, upload } from '../api.js';
@@ -26,6 +26,10 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
   const capture = useRef(null);
   const fileInput = useRef(null);
   const photoInput = useRef(null);
+  const pdfInput = useRef(null);
+  const recorder = useRef(null);
+  const [recording, setRecording] = useState(null); // seconds so far
+  const [pdfProgress, setPdfProgress] = useState(null);
   const [trigger, setTrigger] = useState(null); // { type: 'slash'|'mention', from, query, coords }
   const [ai, setAi] = useState(null);
   const wrap = useRef(null);
@@ -48,6 +52,40 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
     } catch (err) { toastError(err); }
   }
 
+  async function startRecording() {
+    try {
+      const stream2 = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream2);
+      const chunks = [];
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      rec.onstop = async () => {
+        stream2.getTracks().forEach((t) => t.stop());
+        clearInterval(recorder.current?.timer);
+        recorder.current = null;
+        setRecording(null);
+        try {
+          const type = rec.mimeType.split(';')[0] || 'audio/webm';
+          const name = `Recording ${new Date().toLocaleString('sv-SE').slice(0, 16)}.${type.includes('mp4') ? 'm4a' : 'webm'}`;
+          const a = await upload(new File(chunks, name, { type }), { noteId: note.id });
+          editorRef.current.chain().focus().insertContent([{ type: 'audioBlock', attrs: { src: a.url, name } }, { type: 'paragraph' }]).run();
+        } catch (err) { toastError(err); }
+      };
+      rec.start(1000);
+      const started = Date.now();
+      recorder.current = { rec, timer: setInterval(() => setRecording(Math.round((Date.now() - started) / 1000)), 1000) };
+      setRecording(0);
+    } catch (err) { toastError(new Error(`Cannot record: ${err.message}`)); }
+  }
+
+  async function insertPdf(file) {
+    try {
+      const { pdfToBlocks } = await import('./pdf.js');
+      const { blocks, pages, total } = await pdfToBlocks(file, { noteId: note.id }, (i, n) => setPdfProgress(`PDF page ${i} of ${n}…`));
+      editorRef.current.chain().focus().insertContent([...blocks, { type: 'paragraph' }]).run();
+      if (total > pages) toast(`Only the first ${pages} of ${total} pages were added`, { kind: 'error' });
+    } catch (err) { toastError(err); } finally { setPdfProgress(null); }
+  }
+
   // A child page or journal of this page, linked from where the cursor is.
   async function subpage(kind) {
     try {
@@ -65,7 +103,7 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
       Placeholder.configure({ placeholder: ({ node }) => (node.type.name === 'heading' ? 'Heading' : 'Write, or type “/” for blocks and AI, “[[” to link a page…') }),
       TaskList, TaskItem.configure({ nested: true }), Highlight.configure({ multicolor: true }), TextStyle, Color,
       SizedImage.configure({ inline: false, allowBase64: false }), HeadingFold.configure({ noteId: note.id }), TableKit.configure({ table: { resizable: true } }), Typography,
-      InkBlock.configure({ doc, noteId: note.id }), Callout, PageMention, KeyCapture.configure({ onKey: (e) => capture.current?.(e) }),
+      InkBlock.configure({ doc, noteId: note.id }), AudioBlock.configure({ noteId: note.id }), Callout, PageMention, KeyCapture.configure({ onKey: (e) => capture.current?.(e) }),
     ],
     editable: !readOnly,
     editorProps: {
@@ -234,7 +272,7 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
     const t = trigger;
     setTrigger(null);
     e.chain().focus().deleteRange({ from: t.from, to: e.state.selection.from }).run();
-    if (t.type === 'slash') item.run(e, { pickFile: () => fileInput.current?.click(), pickPhoto: () => photoInput.current?.click(), ai: runAi, subpage });
+    if (t.type === 'slash') item.run(e, { pickFile: () => fileInput.current?.click(), pickPhoto: () => photoInput.current?.click(), pickPdf: () => pdfInput.current?.click(), record: startRecording, ai: runAi, subpage });
     else {
       let target = item;
       if (item.create) {
@@ -270,6 +308,9 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
       <EditorContent editor={editor} />
       <BlockTools editor={editor} wrap={wrap} noteId={note.id} readOnly={readOnly} onComment={(quote) => window.dispatchEvent(new CustomEvent('inkwell:comment', { detail: { quote } }))} />
       <input ref={fileInput} type="file" hidden multiple onChange={(e) => { [...e.target.files].forEach((f) => insertFile(f)); e.target.value = ''; }} />
+      <input ref={pdfInput} type="file" hidden accept="application/pdf" onChange={(e) => { const f = e.target.files[0]; if (f) insertPdf(f); e.target.value = ''; }} />
+      {recording !== null && <div className="record-bar"><span className="rec-dot" /> Recording {Math.floor(recording / 60)}:{String(recording % 60).padStart(2, '0')}<button className="primary" onClick={() => recorder.current?.rec.stop()}>Stop</button></div>}
+      {pdfProgress && <div className="record-bar"><span className="spinner" /> {pdfProgress}</div>}
       {/* On phones `capture` opens the camera directly; on desktops it is a normal image picker. */}
       <input ref={photoInput} type="file" hidden accept="image/*" capture="environment" onChange={(e) => { const f = e.target.files[0]; if (f) insertPhoto(f); e.target.value = ''; }} />
       {!readOnly && <BubbleMenu editor={editor} options={{ placement: 'top' }} shouldShow={({ editor: e, state }) => !state.selection.empty && e.isEditable && !e.isActive('inkBlock') && !e.isActive('image')}>

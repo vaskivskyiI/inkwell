@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2, MoveHorizontal } from 'lucide-react';
+import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2, MoveHorizontal, MessagesSquare } from 'lucide-react';
 import { toggleFullscreen } from './ui/fullscreen.js';
 import { get, post, put, patch, del } from './api.js';
 import { store, useStore, findNote, openNote, navigate, toast, toastError, localSet } from './store.js';
@@ -53,7 +53,9 @@ export function NoteView({ id }) {
       if (m.type === 'note:updated' && m.note?.id === id && m.note.updatedAt) setDetail((d) => d && { ...d, updatedAt: m.note.updatedAt });
       if (m.type === 'note:removed' && m.ids.includes(id)) { toast('This page was moved to the trash'); navigate('#/'); }
     });
-    return () => { clearTimeout(t); h.provider.off('synced', show); off(); meta.unobserve(onMeta); h.release(); };
+    const onComment = (e) => { store.set({ panel: 'comments', commentQuote: e.detail?.quote || '' }); localSet('panel', 'comments'); };
+    window.addEventListener('inkwell:comment', onComment);
+    return () => { clearTimeout(t); h.provider.off('synced', show); off(); meta.unobserve(onMeta); window.removeEventListener('inkwell:comment', onComment); h.release(); };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (error) return <div className="empty-state"><h2>{error.status === 404 ? 'Page not found' : 'Could not open the page'}</h2><p>{error.message}</p><button onClick={() => navigate('#/')}>Go home</button></div>;
@@ -172,6 +174,7 @@ function NoteHeader({ detail, setDetail, handle, readOnly, wide }) {
         <button className={`icon${detail.favorite ? ' fav' : ''}`} onClick={toggleFav} title="Favourite" aria-label="Favourite"><Star size={18} /></button>
         <button className={`icon${panel === 'ai' ? ' on' : ''}`} onClick={() => setPanel('ai')} title="AI insights" aria-label="AI insights"><Sparkles size={18} /></button>
         <button className={`icon${panel === 'links' ? ' on' : ''}`} onClick={() => setPanel('links')} title="Links (mail, events, tasks, pages)" aria-label="Links"><Link2 size={18} /></button>
+        <button className={`icon${panel === 'comments' ? ' on' : ''}`} onClick={() => setPanel('comments')} title="Comments" aria-label="Comments"><MessagesSquare size={18} /></button>
         <button className={`icon${panel === 'ask' ? ' on' : ''}`} onClick={() => setPanel('ask')} title="Ask AI about your notes" aria-label="Ask AI"><MessageSquare size={18} /></button>
         <Menu items={items} trigger={<MoreHorizontal size={18} />} label="Page menu" />
       </div>

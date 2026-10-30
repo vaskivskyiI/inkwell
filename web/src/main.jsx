@@ -8,3 +8,5 @@ applyTheme();
 // Phones start with the page, not the sidebar.
 if (window.innerWidth < 800) store.set({ sidebar: false });
 createRoot(document.getElementById('root')).render(<App />);
+// Installable and opens offline; needs https (or localhost).
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

@@ -15,7 +15,7 @@ MCP endpoint (no Halcyon changes needed for the Inkwell → Halcyon direction).
 
 ## 2. State
 - 3 commits. Server + web UI implement everything in docs/PLAN.md §2 except the roadmap items.
-- Tests: `npm test` 51/51 (incl. AFFiNE snapshot and Markdown-zip import) (unit, API, real-WebSocket collaboration, AI with mock provider, fake Halcyon MCP).
+- Tests: `npm test` 55/55 (incl. AFFiNE snapshot and Markdown-zip import) (unit, API, real-WebSocket collaboration, AI with mock provider, fake Halcyon MCP).
   `npm run test:pg -w server`: API 12/12 + AI 7/7 through the production `pg` driver (PGlite wire server).
 - UI checked in the desktop app's browser: sign-up, home, editor (collab load, slash menu, ink block, drawing),
   background handwriting recognition shown under the ink, AI panel (summary, tags, action items, handwriting),
@@ -77,3 +77,11 @@ MCP endpoint (no Halcyon changes needed for the Inkwell → Halcyon direction).
   in the space of earlier ones and carry over open to-dos ("From last time").
 - `GET /api/smart`: Meetings / Tasks / E-mails / Handwritten, derived from `note_links`; a sub-category needs 2+ notes.
 - Pen layer anchors are text-based (`web/src/ink/anchor.js`); strokes from before that stay fixed. Changing page width reflows text, not ink.
+
+### 2026-10-30: blocks, chapters, comments, audio, PDF, review, PWA
+- Editor: `BlockTools.jsx` (block handle, right-click menu, table bar); chapters fold per device via decorations (`HeadingFold`); `pageMention.anchor` links a chapter (`#/n/<id>?h=<heading>`); a pen hovering an image turns it into an inkBlock with `bg` and `width` (%).
+- Task sync (`tasksync.js`): to-do text = task link title. Page → Halcyon: job after save, `complete_task`. Halcyon → page: poll every 5 min. Repeating tasks stay open there, so a tick is sent once, `seenDue` tracks the date, and a moved date ticks the to-do only when `list_tasks` says `repeats`.
+- Comments (`comments.js`, migration 2) with @mentions and notifications; commenters can post.
+- Recordings: `audioBlock`, job `transcribe`, AI task `audio` (OpenAI/OpenAI-compatible Whisper, Gemini; not Ollama, not Anthropic). PDFs: pages rendered in the browser to pictures on inkBlocks, text saved via `PUT /api/assets/:id/text`, limit 150 pages.
+- Review: `POST /api/ai/review`. PWA: `web/public` (manifest, `sw.js`: shell only, never `/api`); needs https.
+- Not tried on real hardware or services: pen hover, recording on a phone, real Whisper/Gemini transcription, real Halcyon task sync, PWA install on a phone.

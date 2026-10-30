@@ -6,6 +6,7 @@ import Image from '@tiptap/extension-image';
 import { sid } from '../ink/geometry.js';
 import { localGet, localSet } from '../store.js';
 import { InkBlockView } from './InkBlockView.jsx';
+import { AudioBlockView } from './AudioBlockView.jsx';
 
 // Handwriting inside a page. Strokes live in the page doc's `ink` map under the block's id.
 export const InkBlock = Node.create({
@@ -23,6 +24,18 @@ export const InkBlock = Node.create({
     // The canvas handles its own pointer and key events; only drags from the handle reach ProseMirror.
     return ReactNodeViewRenderer(InkBlockView, { stopEvent: ({ event }) => !(event.type.startsWith('drag') || event.type === 'drop') || !event.target?.closest?.('[data-drag-handle]') });
   },
+});
+
+export const AudioBlock = Node.create({
+  name: 'audioBlock',
+  group: 'block',
+  atom: true,
+  draggable: true,
+  addOptions: () => ({ noteId: null }),
+  addAttributes: () => ({ src: { default: null }, name: { default: '' } }),
+  parseHTML: () => [{ tag: 'div[data-audio-block]' }],
+  renderHTML: ({ HTMLAttributes }) => ['div', mergeAttributes(HTMLAttributes, { 'data-audio-block': '' })],
+  addNodeView() { return ReactNodeViewRenderer(AudioBlockView, { stopEvent: () => true }); },
 });
 
 export const Callout = Node.create({

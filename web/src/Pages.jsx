@@ -1,7 +1,8 @@
 // Home, search results, trash and the full-page assistant.
 import { useEffect, useRef, useState } from 'react';
-import { FilePlus2, PenLine, CalendarDays, RotateCcw, Trash2, Search as SearchIcon, CheckSquare, Mail, ExternalLink, NotebookText, MoveHorizontal, Camera } from 'lucide-react';
-import { get, post, del, upload } from './api.js';
+import { FilePlus2, PenLine, CalendarDays, RotateCcw, Trash2, Search as SearchIcon, CheckSquare, Mail, ExternalLink, NotebookText, MoveHorizontal, Camera, FileDown } from 'lucide-react';
+import { get, post, del, upload, stream } from './api.js';
+import { Markdown } from './ui/Markdown.jsx';
 import { useStore, openNote, toast, toastError, currentSpace, filterSpace, localGet, localSet } from './store.js';
 import { newPage, openToday } from './Sidebar.jsx';
 import { AskTab } from './RightPanel.jsx';
@@ -64,6 +65,17 @@ const localDay = (d) => d.toLocaleDateString('sv-SE');
 function QuickNote() {
   const [text, setText] = useState('');
   const photo = useRef(null);
+  const pdf = useRef(null);
+  const [progress, setProgress] = useState('');
+  const addPdf = async (file) => {
+    try {
+      const n = await post('/api/notes', { spaceId: currentSpace().id, title: file.name.replace(/\.pdf$/i, ''), icon: '📕' });
+      const { pdfToBlocks } = await import('./editor/pdf.js');
+      const { blocks } = await pdfToBlocks(file, { noteId: n.id }, (i, t) => setProgress(`${i}/${t}`));
+      await post(`/api/notes/${n.id}/blocks`, { blocks });
+      openNote(n.id);
+    } catch (e) { toastError(e); } finally { setProgress(''); }
+  };
   const add = async () => {
     const t = text.trim();
     if (!t) return;
@@ -84,6 +96,8 @@ function QuickNote() {
     <div className="quick-note">
       <input type="text" value={text} placeholder="Quick note — press Enter" aria-label="Quick note" onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
       <button title="Take or choose a photo and draw on it" onClick={() => photo.current?.click()}><Camera size={16} /> Photo</button>
+      <button title="Open a PDF to read and write on" onClick={() => pdf.current?.click()}><FileDown size={16} /> {progress || 'PDF'}</button>
+      <input ref={pdf} type="file" hidden accept="application/pdf" onChange={(e) => { const f = e.target.files[0]; if (f) addPdf(f); e.target.value = ''; }} />
       <input ref={photo} type="file" hidden accept="image/*" capture="environment" onChange={(e) => { const f = e.target.files[0]; if (f) addPhoto(f); e.target.value = ''; }} />
     </div>
   );
@@ -106,6 +120,36 @@ export function SmartPage({ cat, sub }) {
       <div className="cards">
         {notes.map((n) => <a key={n.id} className="card" href={`#/n/${n.id}`}><div className="card-title"><span>{n.icon || '📄'}</span> {n.title || 'Untitled'}</div><div className="card-snippet" /><div className="muted small">{when(n.createdAt)}</div></a>)}
       </div>
+    </div>
+  );
+}
+
+// The week in the notes: what was done and decided, what is open, what to follow up.
+export function ReviewPage() {
+  const spaceId = useStore((s) => s.spaceId);
+  const [days, setDays] = useState(7);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true); setText('');
+    try {
+      const out = await stream('/api/ai/review', { days, spaceId: filterSpace() || undefined }, { onToken: (t) => setText((s) => s + t) });
+      setText(out.text);
+    } catch (e) { toastError(e); } finally { setBusy(false); }
+  };
+  const save = async () => {
+    try { openNote((await post('/api/notes', { spaceId: currentSpace().id, title: `Review ${localDay(new Date())}`, icon: '🧭', markdown: text })).id); } catch (e) { toastError(e); }
+  };
+  return (
+    <div className="page-col">
+      <h1>Review</h1>
+      <p className="muted">{spaceId === 'all' ? 'All spaces' : currentSpace()?.name}: AI goes through the pages changed lately.</p>
+      <div className="row">
+        <select value={days} aria-label="Period" onChange={(e) => setDays(Number(e.target.value))}><option value={7}>Last 7 days</option><option value={14}>Last 14 days</option><option value={31}>Last month</option></select>
+        <button className="primary" disabled={busy} onClick={run}>{busy ? 'Reading…' : 'Write review'}</button>
+        {text && !busy && <button onClick={save}>Save as page</button>}
+      </div>
+      {text && <div style={{ marginTop: 18 }}><Markdown text={text} /></div>}
     </div>
   );
 }

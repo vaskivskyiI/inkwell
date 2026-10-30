@@ -26,6 +26,7 @@
     "@tiptap/react": "^3.32.1",
     "@tiptap/starter-kit": "^3.32.1",
     "lucide-react": "^1.64.0",
+    "pdfjs-dist": "^6.4.299",
     "perfect-freehand": "^1.2.3",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

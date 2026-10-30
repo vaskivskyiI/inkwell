@@ -6,7 +6,7 @@ import { loadSpaces, loadTree, loadFavorites, connectEvents, switchSpace } from 
 import { setUnauthorizedHandler } from './api.js';
 import { Sidebar, newPage, openToday } from './Sidebar.jsx';
 import { NoteView } from './NoteView.jsx';
-import { HomePage, SearchPage, TrashPage, AskPage, NewFromItem, SmartPage } from './Pages.jsx';
+import { HomePage, SearchPage, TrashPage, AskPage, NewFromItem, SmartPage, ReviewPage } from './Pages.jsx';
 import { SettingsPage } from './Settings.jsx';
 import { Palette } from './Palette.jsx';
 import { Rail } from './Rail.jsx';
@@ -73,6 +73,7 @@ export function App() {
   else if (route.name === 'trash') main = <div className="scroll"><TrashPage /></div>;
   else if (route.name === 'search') main = <div className="scroll"><SearchPage q={route.query.q} /></div>;
   else if (route.name === 'ask') main = <div className="scroll"><AskPage /></div>;
+  else if (route.name === 'review') main = <div className="scroll"><ReviewPage /></div>;
   else if (route.name === 'new') main = <NewFromItem query={route.query} />;
   else if (route.name === 'smart') main = <div className="scroll"><SmartPage cat={route.id} sub={route.query.sub} /></div>;
   else main = <div className="scroll"><HomePage /></div>;

@@ -1,11 +1,13 @@
 // Slash-menu entries. `run(editor, ctx)` executes after the "/query" text was removed.
-import { Heading1, Heading2, Heading3, List, ListOrdered, ListChecks, Quote, Code, Minus, Table, Image, PenLine, Lightbulb, Sparkles, FileText, Wand2, Languages, ListTodo, Camera, Footprints, Lightbulb as Idea, HelpCircle, PencilLine, BookOpen } from 'lucide-react';
+import { Heading1, Heading2, Heading3, List, ListOrdered, ListChecks, Quote, Code, Minus, Table, Image, PenLine, Lightbulb, Sparkles, FileText, Wand2, Languages, ListTodo, Camera, Mic, FileDown, Footprints, Lightbulb as Idea, HelpCircle, PencilLine, BookOpen } from 'lucide-react';
 import { sid } from '../ink/geometry.js';
 
 export const SLASH = [
   { id: 'write', label: 'AI: write…', keys: 'ai write compose draft generate', icon: PencilLine, run: (e, ctx) => ctx.ai('write', { ask: 'What should AI write here?' }) },
   { id: 'ink', label: 'Handwriting / drawing', keys: 'ink pen draw handwriting sketch', icon: PenLine, run: (e) => e.chain().focus().insertContent([{ type: 'inkBlock', attrs: { id: sid(), height: 260 } }, { type: 'paragraph' }]).run() },
   { id: 'photo', label: 'Photo or image to draw on', keys: 'photo camera picture image annotate draw markup', icon: Camera, run: (e, ctx) => ctx.pickPhoto() },
+  { id: 'record', label: 'Record audio', keys: 'record audio voice meeting microphone transcribe', icon: Mic, run: (e, ctx) => ctx.record() },
+  { id: 'pdf', label: 'PDF to read and annotate', keys: 'pdf document annotate import', icon: FileDown, run: (e, ctx) => ctx.pickPdf() },
   { id: 'h1', label: 'Heading 1', keys: 'h1 title heading', icon: Heading1, run: (e) => e.chain().focus().setNode('heading', { level: 1 }).run() },
   { id: 'h2', label: 'Heading 2', keys: 'h2 heading subtitle', icon: Heading2, run: (e) => e.chain().focus().setNode('heading', { level: 2 }).run() },
   { id: 'h3', label: 'Heading 3', keys: 'h3 heading', icon: Heading3, run: (e) => e.chain().focus().setNode('heading', { level: 3 }).run() },

@@ -186,8 +186,8 @@ function AiSettings() {
       )}
 
       <h3>Which model does what</h3>
-      <p className="hint">Handwriting and images need a vision model (e.g. qwen2.5vl, llava, GPT-4.1, Claude, Gemini). Search by meaning needs an embedding model.</p>
-      {[['chat', 'Writing, summaries, questions'], ['vision', 'Handwriting & images'], ['embed', 'Search by meaning']].map(([task, label]) => {
+      <p className="hint">Handwriting and images need a vision model (e.g. qwen2.5vl, llava, GPT-4.1, Claude, Gemini). Search by meaning needs an embedding model. Recordings need speech to text: OpenAI (whisper-1), Gemini, or an OpenAI-compatible server with a Whisper model; Ollama does not offer it.</p>
+      {[['chat', 'Writing, summaries, questions'], ['vision', 'Handwriting & images'], ['embed', 'Search by meaning'], ['audio', 'Speech to text (recordings)']].map(([task, label]) => {
         const r = settings.ai[task];
         return (
           <div key={task} className="route-row">

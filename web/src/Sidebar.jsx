@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, LogOut, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles } from 'lucide-react';
+import { ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, LogOut, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass } from 'lucide-react';
 import { get, post, patch, del } from './api.js';
 import { store, useStore, openNote, navigate, toast, toastError, localGet, localSet, currentSpace } from './store.js';
 import { forgetDoc, onEvent } from './data.js';
@@ -48,6 +48,7 @@ export function Sidebar() {
       <a className={`nav-item${route.name === 'home' ? ' on' : ''}`} href="#/"><Home size={16} /> Home</a>
       <button className="nav-item" onClick={openToday}><PenLine size={16} /> Today's journal</button>
       <a className={`nav-item${route.name === 'ask' ? ' on' : ''}`} href="#/ask"><MessageSquare size={16} /> Ask Inkwell</a>
+      <a className={`nav-item${route.name === 'review' ? ' on' : ''}`} href="#/review"><Compass size={16} /> Review</a>
       {halcyon?.connected && <a className="nav-item" href="#/?meetings=1"><CalendarPlus size={16} /> Meeting notes</a>}
 
       {favorites.length > 0 && (

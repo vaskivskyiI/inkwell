@@ -14,7 +14,8 @@ Self-hostable, AI-native notes — between OneNote, Microsoft Journal, AFFiNE an
   annotate; pinch / Ctrl+wheel zoom, whole-stroke or partial eraser, shape correction (lines, rectangles, circles…).
 - **Tags** (manual, #hashtags and AI suggestions), **connections** under every page (links, backlinks, related pages
   found by AI, unlinked mentions), cross-links, sub-pages and sub-journals in any combination.
-- **Live co-editing on every device** (Yjs CRDT): cursors, presence, offline editing that merges on reconnect.
+- **Live co-editing on every device** (Yjs CRDT): cursors, presence, offline editing that merges on reconnect; comments with @mentions; installable as an app (PWA).
+- **Recordings** with transcripts and AI minutes, **PDFs** to read and annotate by pen, weekly **review** by AI, foldable chapters, links to chapters, block menus, table tools.
 - **Spaces** (Private, Work, team spaces) shared with roles, shown one at a time or all together, matched to Halcyon spaces
   by name or by choice; smart categories (meetings, recurring meetings, tasks, e-mails, handwritten); nested pages, favourites, daily journal, templates,
   version history, trash, public read-only links, Markdown/HTML export.
@@ -23,7 +24,7 @@ Self-hostable, AI-native notes — between OneNote, Microsoft Journal, AFFiNE an
 - **Halcyon integration**: one-click switch between Notes, Mail, Calendar and Tasks; Today on Home (meetings, open
   tasks, e-mails waiting for you) with a note for each; deep link `#/new?kind=event|email|task&ref=…` creates or opens
   the note for any item; link pages to e-mails, calendar events, tasks and people; meeting notes from today's
-  events; action items → Halcyon tasks.
+  events; action items → Halcyon tasks, with to-dos and tasks ticking each other.
 
 Plan, architecture and roadmap: [docs/PLAN.md](docs/PLAN.md) · project state for the next developer: [docs/HANDOFF.md](docs/HANDOFF.md).
 
