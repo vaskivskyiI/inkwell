@@ -200,3 +200,48 @@ test('recordings are transcribed and join the page text; the weekly review reads
   const last = JSON.parse(r.body.trim().split('\n').at(-1));
   assert.ok(last.done && last.pages > 0);
 });
+
+test('repeating tasks: one completion per tick, a moved due date ticks the to-do, polling never unticks', async () => {
+  const http = await import('node:http');
+  const { drain } = await import('../src/ai/queue.js');
+  const { pullTasks } = await import('../src/tasksync.js');
+  const { setTodoChecked } = await import('../src/docmodel.js');
+  const task = { id: 51, title: 'x', done: false, due: '2026-11-02T08:00:00.000Z', repeats: true };
+  let completions = 0;
+  const fake = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      const { id, params } = JSON.parse(body);
+      let out = [];
+      if (params.name === 'list_tasks') out = [task];
+      if (params.name === 'create_task') out = { id: 51 };
+      if (params.name === 'complete_task') { completions++; task.due = '2026-11-09T08:00:00.000Z'; out = { id: 51, done: false, next_due: task.due, completed_id: 900 + completions }; }
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(out) }], structuredContent: Array.isArray(out) ? { items: out } : out } }));
+    });
+  });
+  await new Promise((r) => fake.listen(0, '127.0.0.1', r));
+  try {
+    await ann.put('/api/integrations/halcyon', { baseUrl: `http://127.0.0.1:${fake.address().port}`, token: 'hmcp_x' });
+    const n = await ann.post('/api/notes', { spaceId: work(), title: 'Weekly', markdown: '- [ ] Water plants' });
+    await ann.post(`/api/notes/${n.id}/tasks`, { items: [{ text: 'Water plants' }] });
+    await pullTasks(ann.user); // learns the due date
+    // Ticked here: sent once, and the poll that sees it open again changes nothing.
+    await withDoc(n.id, (d) => setTodoChecked(d, 'Water plants', true), ann.user);
+    await new Promise((r) => setTimeout(r, 2200));
+    await drain();
+    assert.equal(completions, 1);
+    await pullTasks(ann.user);
+    assert.match(await ann.get(`/api/notes/${n.id}/export`), /- \[x\] Water plants/);
+    // Unticked here: nothing is sent.
+    await withDoc(n.id, (d) => setTodoChecked(d, 'Water plants', false), ann.user);
+    await new Promise((r) => setTimeout(r, 2200));
+    await drain();
+    assert.equal(completions, 1);
+    // Ticked in Halcyon: only the due date moves.
+    task.due = '2026-11-16T08:00:00.000Z';
+    await pullTasks(ann.user);
+    assert.match(await ann.get(`/api/notes/${n.id}/export`), /- \[x\] Water plants/);
+    assert.equal(completions, 1);
+  } finally { fake.close(); await ann.del('/api/integrations/halcyon'); }
+});
