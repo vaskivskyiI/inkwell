@@ -230,7 +230,7 @@ function PenSettings() {
         <div className="seg">{[['auto', 'Automatic'], ['on', 'Pen only'], ['off', 'Fingers draw too']].map(([v, l]) => <button key={v} className={settings.penOnly === v ? 'on' : ''} onClick={() => saveSettings({ penOnly: v })}>{l}</button>)}</div>
       </Field>
       <h3>Shortcuts on a canvas</h3>
-      <p className="hint">P pen · H highlighter · E eraser · L lasso (select, drag to move, Delete) · T text box (journal) · Ctrl+Z / Ctrl+Y undo/redo. The pen's eraser end and barrel button erase.</p>
+      <p className="hint">P pen · H highlighter · E eraser · L lasso (select, drag to move, Delete) · S insert space (drag down for room, up to close a gap) · T text box (journal) · Ctrl+Z / Ctrl+Y undo/redo. The pen's eraser end and barrel button erase.</p>
     </>
   );
 }

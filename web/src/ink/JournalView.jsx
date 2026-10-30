@@ -54,7 +54,7 @@ export function JournalView({ note, doc, readOnly }) {
       )}
       <div className="journal-paper">
         <InkCanvas ref={canvas} doc={doc} canvasId="page" height={height} minHeight={1400} autoGrow onHeightChange={grow} readOnly={readOnly} paper={paper}
-          onTap={readOnly ? undefined : addBox}>
+          onTap={readOnly ? undefined : addBox} onSpace={(y0, dy) => doc.transact(() => { for (const m of boxes.values()) if (m.get('y') >= y0) m.set('y', Math.max(0, m.get('y') + dy)); })}>
           {(scale) => [...boxes.entries()].map(([id, m]) => <TextBox key={id} id={id} map={m} scale={scale} readOnly={readOnly} onDelete={() => boxes.delete(id)} />)}
         </InkCanvas>
         {!readOnly && <button className="add-paper" onClick={() => grow(height + 1000)}><Plus size={15} /> More paper</button>}

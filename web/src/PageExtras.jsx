@@ -119,7 +119,7 @@ export function PenLayer({ doc, on, readOnly, children }) {
     <>
       {on && !readOnly && (
         <div className="pen-bar">
-          <InkToolbar canvas={canvas} zoom={false} extra={<>
+          <InkToolbar canvas={canvas} zoom={false} space={false} extra={<>
             <button className={tool.anchor !== false ? 'on' : ''} title="Stick new ink to the text under it, so it moves along when text is added or removed above" onClick={() => setInkTool({ anchor: tool.anchor === false })}><Pin size={15} /> Stick to text</button>
             <button onClick={() => store.set({ penLayer: false })}>Done</button>
           </>} />
@@ -128,7 +128,7 @@ export function PenLayer({ doc, on, readOnly, children }) {
       <div className="page-body" style={{ position: 'relative' }}>
         <div ref={host}>{children}</div>
         <div className={`pen-layer${on && !readOnly ? ' on' : ''}`}>
-          <InkCanvas ref={canvas} doc={doc} canvasId="overlay" height={logicalH} minHeight={logicalH} readOnly={!on || readOnly} zoomable={false}
+          <InkCanvas ref={canvas} doc={doc} canvasId="overlay" height={logicalH} minHeight={logicalH} readOnly={!on || readOnly} zoomable={false} spaceable={false}
             anchorFor={anchorFor} offsetOf={offsetOf} redrawKey={layoutKey} />
         </div>
       </div>

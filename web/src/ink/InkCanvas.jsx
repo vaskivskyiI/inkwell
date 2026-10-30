@@ -27,7 +27,7 @@ const scrollParent = (el) => {
 
 // offsetOf(stroke) → vertical shift in logical units (ink anchored to text that moved); anchorFor(stroke) → anchor
 // stored on new strokes; redrawKey: changes when offsets may have changed.
-export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, onHeightChange, autoGrow = false, minHeight = 200, readOnly = false, paper = 'plain', background, onTap, children, onStrokesChange, zoomable = true, offsetOf, anchorFor, redrawKey }, ref) {
+export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, onHeightChange, autoGrow = false, minHeight = 200, readOnly = false, paper = 'plain', background, onTap, children, onStrokesChange, zoomable = true, offsetOf, anchorFor, redrawKey, spaceable = true, onSpace }, ref) {
   const offOf = (s) => (s.a && offsetOf ? offsetOf(s) || 0 : 0);
   // The stroke where it is shown (points shifted by its offset), for hit tests and selection.
   const shown = (s) => { const o = offOf(s); return o ? { ...s, p: s.p.map((v, i) => (i % 3 === 1 ? v + o : v)) } : s; };
@@ -240,6 +240,14 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     const eraser = e.button === 5 || (e.buttons & 32) || tool.tool === 'eraser';
     if (tool.tool === 'text' && onTap) { g.current = { kind: 'tap', p }; return; }
     if (eraser) { g.current = { kind: 'erase' }; erase(p); return; }
+    if (tool.tool === 'space' && spaceable) {
+      // Everything lower down moves; dragging up only closes empty space.
+      const below = strokes.current.filter((s) => middleY(s) >= p[1]);
+      const top = bounds(below)?.minY ?? Infinity;
+      g.current = { kind: 'space', y0: p[1], dy: 0, ids: new Set(below.map((s) => s.id)), minDy: top === Infinity ? 0 : p[1] - top };
+      drawLive();
+      return;
+    }
     if (tool.tool === 'lasso') {
       const b = sel.current.box;
       if (b && sel.current.ids.size && p[0] > b.minX - 8 && p[0] < b.maxX + 8 && p[1] > b.minY - 8 && p[1] < b.maxY + 8) g.current = { kind: 'move', from: p, dx: 0, dy: 0 };
@@ -285,6 +293,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     } else if (gs.kind === 'erase') for (const ev of events) erase(pt(ev));
     else if (gs.kind === 'lasso') { const p = pt(e); gs.poly.push([p[0], p[1]]); drawLive(); }
     else if (gs.kind === 'move') { const p = pt(e); gs.dx = p[0] - gs.from[0]; gs.dy = p[1] - gs.from[1]; drawLive(); }
+    else if (gs.kind === 'space') { gs.dy = Math.max(Math.min(0, gs.minDy), pt(e)[1] - gs.y0); drawLive(); }
   }
 
   function onUp(e) {
@@ -308,6 +317,23 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
         const b = bounds([s]);
         if (b && b.maxY > h - 20) onHeightChange(Math.ceil((b.maxY + 60) / 20) * 20);
       }
+    } else if (gs.kind === 'space' && Math.abs(gs.dy) >= 2) {
+      const a = yarr.current;
+      const dy = Math.round(gs.dy);
+      if (a?.length && gs.ids.size) {
+        doc.transact(() => {
+          const moved = [];
+          for (let i = a.length - 1; i >= 0; i--) {
+            const s = a.get(i);
+            if (!gs.ids.has(s.id)) continue;
+            a.delete(i, 1);
+            moved.unshift({ ...s, id: sid(), p: s.p.map((v, j) => (j % 3 === 1 ? Math.round((v + dy) * 10) / 10 : v)) });
+          }
+          a.push(moved);
+        }, LOCAL);
+      }
+      onSpace?.(gs.y0, dy);
+      if (dy > 0 && onHeightChange) onHeightChange(Math.ceil((h + dy) / 10) * 10);
     } else if (gs.kind === 'tap') onTap?.(gs.p[0], gs.p[1]);
     else if (gs.kind === 'lasso' && gs.poly.length > 3) {
       sel.current = { ids: new Set(strokes.current.filter((s) => strokeInLasso(shown(s), gs.poly)).map((s) => s.id)), box: null };
@@ -365,6 +391,15 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     } else if (gs?.kind === 'lasso') {
       ctx.strokeStyle = '#6366f1'; ctx.lineWidth = 1.5 / scale; ctx.setLineDash([5 / scale, 4 / scale]);
       ctx.beginPath(); gs.poly.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke();
+    } else if (gs?.kind === 'space') {
+      // The opening space and where the lower part will go.
+      ctx.fillStyle = 'rgba(37, 99, 235, .12)';
+      ctx.fillRect(0, Math.min(gs.y0, gs.y0 + gs.dy), CANVAS_WIDTH, Math.abs(gs.dy));
+      ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 1.5 / scale; ctx.setLineDash([8 / scale, 5 / scale]);
+      ctx.beginPath(); ctx.moveTo(0, gs.y0); ctx.lineTo(CANVAS_WIDTH, gs.y0); ctx.stroke(); ctx.setLineDash([]);
+      ctx.translate(0, gs.dy);
+      ctx.globalAlpha = 0.55;
+      for (const s of strokes.current) if (gs.ids.has(s.id)) { ctx.fillStyle = s.c; ctx.fill(pathOf(s)); }
     } else if (gs?.kind === 'move') {
       ctx.translate(gs.dx, gs.dy);
       ctx.globalAlpha = 0.6;
@@ -388,7 +423,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     : paper === 'grid' ? { backgroundImage: 'linear-gradient(var(--paper-line) 1px, transparent 1px), linear-gradient(90deg, var(--paper-line) 1px, transparent 1px)', backgroundSize: `${s}px ${s}px` }
       : paper === 'dotted' ? { backgroundImage: 'radial-gradient(var(--paper-dot) 1.2px, transparent 1.4px)', backgroundSize: `${s}px ${s}px` } : {};
 
-  const cursor = readOnly ? 'default' : tool.tool === 'eraser' ? 'cell' : tool.tool === 'lasso' ? 'crosshair' : tool.tool === 'text' ? 'text' : 'crosshair';
+  const cursor = readOnly ? 'default' : tool.tool === 'space' && spaceable ? 'row-resize' : tool.tool === 'eraser' ? 'cell' : tool.tool === 'lasso' ? 'crosshair' : tool.tool === 'text' ? 'text' : 'crosshair';
   const W = width * zoom, H = h * scale;
   return (
     <div ref={wrap} className={`ink-canvas${zoom > 1 ? ' zoomed' : ''}`} style={{ height: H }} tabIndex={readOnly ? -1 : 0} onKeyDown={onKey}>
@@ -417,4 +452,5 @@ function shapeOf(stroke, { minSize }) {
   return { kind: r.kind, p: r.points.flatMap(([x, y], i) => [x, y, press(i)]) };
 }
 
+const middleY = (s) => { const b = bounds([{ ...s, w: 0 }]); return b ? (b.minY + b.maxY) / 2 : 0; };
 const hlColor = (c) => (/^#(1f2937|000000|111827)$/i.test(c) ? '#facc15' : c);
