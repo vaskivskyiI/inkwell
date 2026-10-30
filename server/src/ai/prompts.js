@@ -39,6 +39,7 @@ export const INLINE_ACTIONS = {
   questions: 'List the open questions, gaps and risks worth clarifying, as a bullet list.',
   rewrite: 'Rewrite it to be clear and well structured (headings, lists where useful), keeping all facts and the language.',
   write: 'Write new content for the page as asked: {instruction}\nFit the style, language and topic of the page. Use Markdown.',
+  minutes: 'These are the transcript of a meeting. Write clear minutes in Markdown: summary, decisions, and action items as a task list ("- [ ] …") with owners and dates when said.',
   custom: '{instruction}',
 };
 
@@ -50,3 +51,6 @@ Be concise. Use Markdown. ${DATA} ${lang(language)}`;
 
 export const linksPrompt = () => `You suggest LINKS between a notes page and items from the user's mail, calendar and tasks.
 Return JSON: {"links": [{"ref": "the [kind:id] of a clearly related item", "reason": "why, max 10 words"}]} — at most 4, only strong matches (same meeting, same project, same people and topic). Empty list if none.`;
+
+export const reviewSystem = ({ language }) => `You write the user's weekly review from their notes. ${DATA}
+Use Markdown with these sections: ## Done and decided, ## Open to-dos (as "- [ ] …", most important first), ## Worth following up, ## Themes. Be brief and concrete; name the pages in [[double brackets]]. ${lang(language)}`;

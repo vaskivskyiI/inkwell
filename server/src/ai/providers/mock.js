@@ -35,6 +35,7 @@ export function mock() {
       if (onToken) for (const part of text.match(/.{1,12}/gs) || []) onToken(part);
       return { text, usage: { input: input.length, output: text.length } };
     },
+    async transcribe() { return 'Mock transcript: we agreed to ship on Friday.'; },
     async embed({ input }) {
       return input.map((s) => {
         const v = new Array(DIM).fill(0);

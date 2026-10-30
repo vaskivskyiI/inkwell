@@ -2,7 +2,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
-import { startServer, signup } from './helpers.js';
+import { startServer, signup, addMockAi } from './helpers.js';
 
 let app, ann, withDoc;
 before(async () => {
@@ -127,4 +127,76 @@ test('the client\'s day decides which occurrence a note belongs to', async () =>
   assert.equal((await ann.get('/api/links/lookup?kind=event&ref=800'))[0].date, '2026-10-06');
   const again = await ann.post('/api/notes/from-item', { kind: 'event', ref: '800', title: 'Late call', meta: { start: '2026-10-05T23:45:00Z', day: '2026-10-06' } });
   assert.equal(again.id, a.id);
+});
+
+test('comments: quotes, replies, @mentions become notifications; commenters may comment, viewers not', async () => {
+  const bob = await signup(app, 'bob@test.local', 'Bob Kos');
+  const team = await ann.post('/api/spaces', { name: 'Comment team' });
+  await ann.post(`/api/spaces/${team.id}/members`, { email: 'bob@test.local', role: 'commenter' });
+  const n = await ann.post('/api/notes', { spaceId: team.id, title: 'Draft', markdown: 'Text' });
+  const c = await ann.post(`/api/notes/${n.id}/comments`, { body: 'What do you think, @bob?', quote: 'Text' });
+  assert.equal(c.quote, 'Text');
+  const list = await bob.get('/api/notifications');
+  assert.match(list[0].text, /mentioned you in “Draft”/);
+  const r = await bob.post(`/api/notes/${n.id}/comments`, { body: 'Good', parentId: c.id });
+  assert.equal(r.parentId, c.id);
+  assert.match((await ann.get('/api/notifications'))[0].text, /replied/);
+  await ann.patch(`/api/comments/${c.id}`, { resolved: true });
+  assert.equal((await bob.get(`/api/notes/${n.id}/comments`))[0].resolved, true);
+  await ann.patch(`/api/spaces/${team.id}/members/${bob.user.id}`, { role: 'viewer' });
+  assert.equal(await bob.status('POST', `/api/notes/${n.id}/comments`, { body: 'x' }), 403);
+});
+
+test('to-dos and Halcyon tasks follow each other', async () => {
+  const http = await import('node:http');
+  const { drain } = await import('../src/ai/queue.js');
+  const { pullTasks } = await import('../src/tasksync.js');
+  const tasks = { 41: false };
+  const calls = [];
+  const fake = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      const { id, params } = JSON.parse(body);
+      calls.push(params);
+      if (params.name === 'complete_task') tasks[params.arguments.id] = params.arguments.done;
+      const out = params.name === 'list_tasks' ? Object.entries(tasks).map(([i, done]) => ({ id: Number(i), title: 'x', done })) : params.name === 'create_task' ? { id: 41 } : [];
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(out) }], structuredContent: Array.isArray(out) ? { items: out } : out } }));
+    });
+  });
+  await new Promise((r) => fake.listen(0, '127.0.0.1', r));
+  try {
+    await ann.put('/api/integrations/halcyon', { baseUrl: `http://127.0.0.1:${fake.address().port}`, token: 'hmcp_x' });
+    const n = await ann.post('/api/notes', { spaceId: work(), title: 'Sync', markdown: '- [ ] Call Ana' });
+    await ann.post(`/api/notes/${n.id}/tasks`, { items: [{ text: 'Call Ana' }] });
+    // Ticked in Halcyon → ticked here.
+    tasks[41] = true;
+    assert.equal((await pullTasks(ann.user)).changed, 1);
+    assert.match(await ann.get(`/api/notes/${n.id}/export`), /- \[x\] Call Ana/);
+    // Unticked here → reopened in Halcyon.
+    const { setTodoChecked } = await import('../src/docmodel.js');
+    await withDoc(n.id, (d) => setTodoChecked(d, 'Call Ana', false), ann.user);
+    await new Promise((r) => setTimeout(r, 2200));
+    await drain();
+    assert.equal(tasks[41], false);
+    assert.equal(calls.filter((c) => c.name === 'complete_task').at(-1).arguments.done, false);
+  } finally { fake.close(); await ann.del('/api/integrations/halcyon'); }
+});
+
+test('recordings are transcribed and join the page text; the weekly review reads recent pages', async () => {
+  await addMockAi(ann);
+  const { drain } = await import('../src/ai/queue.js');
+  const n = await ann.post('/api/notes', { spaceId: work(), title: 'Standup' });
+  const boundary = 'b0';
+  const body = Buffer.concat([Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="noteId"\r\n\r\n${n.id}\r\n--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="r.webm"\r\nContent-Type: audio/webm;codecs=opus\r\n\r\n`), Buffer.from('fakeaudio'), Buffer.from(`\r\n--${boundary}--\r\n`)]);
+  const up = JSON.parse((await app.inject({ method: 'POST', url: '/api/assets', payload: body, headers: { cookie: ann.cookie, 'content-type': `multipart/form-data; boundary=${boundary}` } })).body);
+  assert.equal(up.mime, 'audio/webm');
+  await withDoc(n.id, (d) => { const el = new Y.XmlElement('audioBlock'); el.setAttribute('src', up.url); d.getXmlFragment('default').insert(0, [el]); }, ann.user);
+  await new Promise((r) => setTimeout(r, 1200));
+  await drain();
+  assert.match((await ann.get(`/api/assets/${up.id}/text`)).text, /ship on Friday/);
+  assert.ok((await ann.get('/api/search?q=ship friday')).some((h) => h.id === n.id));
+  const r = await app.inject({ method: 'POST', url: '/api/ai/review', payload: { spaceId: work(), days: 7 }, headers: { cookie: ann.cookie } });
+  const last = JSON.parse(r.body.trim().split('\n').at(-1));
+  assert.ok(last.done && last.pages > 0);
 });

@@ -168,6 +168,8 @@ export default async function halcyonRoutes(app) {
     .map((m) => ({ ...mailOut(m), meta: { ...mailOut(m).meta, action: m.action || null, needsReply: !!m.needs_reply } })));
   app.get('/api/halcyon/message/:id', async (req) => call(await need(req.user.id), 'get_message', { id: Number(req.params.id) || 0 }));
 
+  app.post('/api/halcyon/pull-tasks', async (req) => (await import('../tasksync.js')).pullTasks(req.user));
+
   app.post('/api/halcyon/tasks', async (req) => {
     const conn = await need(req.user.id);
     const b = req.body || {};

@@ -198,6 +198,32 @@ const MIGRATIONS = [
     PRIMARY KEY (user_id, kind)
   );
   `,
+  // 2 — comments and notifications
+  `
+  CREATE TABLE comments (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    note_id uuid NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    parent_id uuid REFERENCES comments(id) ON DELETE CASCADE,
+    user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+    quote text NOT NULL DEFAULT '',
+    body text NOT NULL,
+    resolved boolean NOT NULL DEFAULT false,
+    created_at bigint NOT NULL
+  );
+  CREATE INDEX comments_note ON comments(note_id, created_at);
+
+  CREATE TABLE notifications (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind text NOT NULL,
+    note_id uuid NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    actor_id uuid REFERENCES users(id) ON DELETE SET NULL,
+    text text NOT NULL,
+    read boolean NOT NULL DEFAULT false,
+    created_at bigint NOT NULL
+  );
+  CREATE INDEX notifications_user ON notifications(user_id, read, created_at DESC);
+  `,
 ];
 
 export async function migrate(db) {

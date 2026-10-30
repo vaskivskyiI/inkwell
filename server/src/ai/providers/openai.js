@@ -48,6 +48,14 @@ export function openai({ baseUrl, apiKey, type }) {
       emit.flush();
       return { text: stripThink(text), usage };
     },
+    async transcribe({ model, data, mime, name, signal }) {
+      const form = new FormData();
+      form.append('model', model);
+      form.append('file', new Blob([data], { type: mime }), name || 'audio.webm');
+      const r = await fetch(`${base}/audio/transcriptions`, { method: 'POST', headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}, body: form, signal });
+      if (!r.ok) throw new Error(`Transcription failed: ${r.status} ${(await r.text()).slice(0, 200)}`);
+      return (await r.json()).text || '';
+    },
     async embed({ model, input, signal }) {
       const r = await request(`${base}/embeddings`, { headers, body: { model, input }, signal });
       const d = await r.json();

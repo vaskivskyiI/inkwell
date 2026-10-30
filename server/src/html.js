@@ -50,6 +50,7 @@ function block(el, ctx) {
     case 'horizontalRule': return '<hr>';
     case 'image': return `<p>${img(el, ctx)}</p>`;
     case 'table': return `<table>${el.toArray().map((r) => `<tr>${r.toArray().map((c) => (c.nodeName === 'tableHeader' ? `<th>${kids(c, ctx)}</th>` : `<td>${kids(c, ctx)}</td>`)).join('')}</tr>`).join('')}</table>`;
+    case 'audioBlock': return `<p><audio controls src="${esc(ctx.asset(safeUrl(el.getAttribute('src'))))}"></audio></p>`;
     case 'inkBlock': {
       const strokes = strokesOf(ctx.doc, el.getAttribute('id'));
       const h = Number(el.getAttribute('height')) || 240;

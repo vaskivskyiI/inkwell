@@ -226,6 +226,14 @@ export default async function noteRoutes(app) {
     return { ok: true };
   });
 
+  // Blocks made on a client (the pages of a PDF) added to a page.
+  app.post('/api/notes/:id/blocks', async (req) => {
+    const n = await needNote(req.user.id, req.params.id, 'editor');
+    const blocks = (Array.isArray(req.body?.blocks) ? req.body.blocks : []).filter((b) => ['inkBlock', 'paragraph', 'heading'].includes(b?.type)).slice(0, 500);
+    await withDoc(n.id, (doc) => appendBlocks(doc, blocks, 'rest'), req.user);
+    return { ok: true };
+  });
+
   // Markdown → editor JSON (the web editor inserts AI output and pasted Markdown with this).
   app.post('/api/markdown/blocks', async (req) => ({ blocks: markdownToBlocks(str(req.body?.markdown, 2e6)) }));
 

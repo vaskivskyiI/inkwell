@@ -5,7 +5,7 @@ import { needNote } from '../spaces.js';
 import { getSettings, saveSettings, getServerSetting, setServerSetting } from '../settings.js';
 import { PROVIDER_TYPES, makeProvider } from '../ai/providers/index.js';
 import { availableProviders, resolve, forgetProvider } from '../ai/router.js';
-import { INLINE_ACTIONS, inlineSystem } from '../ai/prompts.js';
+import { INLINE_ACTIONS, inlineSystem, reviewSystem } from '../ai/prompts.js';
 import { enqueue } from '../ai/queue.js';
 import { resumeWaiting, reanalyseAll } from '../ai/tasks.js';
 import { ask } from '../ai/assistant.js';
@@ -83,11 +83,11 @@ export default async function aiRoutes(app) {
   });
 
   app.get('/api/ai/status', async (req) => {
-    const [chat, vision, embed] = await Promise.all(['chat', 'vision', 'embed'].map((t) => resolve(req.user.id, t)));
+    const [chat, vision, embed, audio] = await Promise.all(['chat', 'vision', 'embed', 'audio'].map((t) => resolve(req.user.id, t)));
     const out = (r) => r && { provider: r.name, model: r.model, local: r.local };
     const jobs = await one(`SELECT count(*) FILTER (WHERE status = 'queued')::int AS queued, count(*) FILTER (WHERE status = 'running')::int AS running,
       count(*) FILTER (WHERE status = 'failed')::int AS failed FROM jobs WHERE user_id = $1`, req.user.id);
-    return { chat: out(chat), vision: out(vision), embed: out(embed), jobs };
+    return { chat: out(chat), vision: out(vision), embed: out(embed), audio: out(audio), jobs };
   });
 
   // ---- settings (also used for non-AI preferences)
@@ -99,7 +99,7 @@ export default async function aiRoutes(app) {
     if (b.ai && typeof b.ai === 'object') {
       allowed.ai = {};
       for (const k of ['enabled', 'background']) if (b.ai[k] !== undefined) allowed.ai[k] = !!b.ai[k];
-      for (const k of ['chat', 'vision', 'embed']) {
+      for (const k of ['chat', 'vision', 'embed', 'audio']) {
         if (b.ai[k] === null) allowed.ai[k] = null;
         else if (b.ai[k]?.providerId) allowed.ai[k] = { providerId: str(b.ai[k].providerId, 60), model: str(b.ai[k].model, 200) };
       }
@@ -144,6 +144,25 @@ export default async function aiRoutes(app) {
     return streamNdjson(reply, async ({ onToken, signal }) => {
       const out = await r.provider.chat({ model: r.model, system: inlineSystem(settings), messages: [{ role: 'user', content: user }], onToken, signal, temperature: action === 'continue' ? 0.7 : 0.3, maxTokens: 2500 });
       return { text: out.text.trim(), model: r.model };
+    });
+  });
+
+  // Weekly review: what happened in the notes of a space (or all) during the last days.
+  app.post('/api/ai/review', async (req, reply) => {
+    const b = req.body || {};
+    const days = Math.min(31, Math.max(1, Number(b.days) || 7));
+    let spaces = (await many('SELECT space_id FROM space_members WHERE user_id = $1', req.user.id)).map((r) => r.space_id);
+    if (isUuid(b.spaceId)) spaces = spaces.filter((s) => s === b.spaceId);
+    const rows = await many(`SELECT n.title, left(n.text_content, 500) AS text, i.summary, i.actions_json FROM notes n LEFT JOIN ai_insights i ON i.note_id = n.id
+      WHERE n.space_id = ANY($1::uuid[]) AND n.deleted_at IS NULL AND n.updated_at > $2 AND n.title <> 'Journal' ORDER BY n.updated_at DESC LIMIT 60`, spaces, now() - days * 864e5);
+    if (!rows.length) fail(404, `No pages changed in the last ${days} days`);
+    const r = await resolve(req.user.id, 'chat', { spaceId: isUuid(b.spaceId) ? b.spaceId : undefined });
+    if (!r) fail(409, 'No AI provider is configured — add one in Settings → AI');
+    const settings = await getSettings(req.user.id);
+    const user = rows.map((n) => `### ${n.title || 'Untitled'}\n${n.summary || n.text}${n.actions_json?.length ? `\nOpen: ${n.actions_json.map((a) => a.text).join('; ')}` : ''}`).join('\n\n');
+    return streamNdjson(reply, async ({ onToken, signal }) => {
+      const out = await r.provider.chat({ model: r.model, system: reviewSystem(settings), messages: [{ role: 'user', content: `Notes changed in the last ${days} days:\n\n${user.slice(0, 40000)}` }], onToken, signal, temperature: 0.3, maxTokens: 2500 });
+      return { text: out.text.trim(), pages: rows.length };
     });
   });
 

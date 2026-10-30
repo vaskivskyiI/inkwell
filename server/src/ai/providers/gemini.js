@@ -28,6 +28,10 @@ export function gemini({ baseUrl, apiKey }) {
       }
       return { text, usage };
     },
+    async transcribe({ model, data, mime, signal }) {
+      const r = await this.chat({ model, signal, maxTokens: 8000, messages: [{ role: 'user', content: 'Transcribe this recording verbatim, in its own language. Output only the transcript.', images: [{ mime, data: Buffer.from(data).toString('base64') }] }] });
+      return r.text;
+    },
     async embed({ model, input }) {
       const r = await request(`${base}/models/${model}:batchEmbedContents`, {
         headers, body: { requests: input.map((text) => ({ model: `models/${model}`, content: { parts: [{ text }] } })) },

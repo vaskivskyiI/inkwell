@@ -123,6 +123,21 @@ registerHandler('image', async (job) => {
   }
 });
 
+// ---- recordings: speech to text; the transcript joins the page's text like handwriting does
+registerHandler('transcribe', async (job) => {
+  const a = await one('SELECT * FROM assets WHERE id = $1', job.ref);
+  if (!a || a.ai_text) return;
+  if (!(await backgroundAllowed(job.user_id))) return;
+  const r = await resolve(job.user_id, 'audio', { spaceId: a.space_id });
+  if (!r?.provider.transcribe) return NO_PROVIDER;
+  const text = String(await r.provider.transcribe({ model: r.model, data: await readAsset(a), mime: a.mime, name: a.name })).trim().slice(0, 200000);
+  await q('UPDATE assets SET ai_text = $2 WHERE id = $1', a.id, text || '-');
+  if (a.note_id) {
+    const n = await noteInfo(a.note_id);
+    if (n && !n.deleted_at) { await persist(a.note_id, await readDoc(a.note_id), null); publish(n.space_id, 'ai:audio', { noteId: n.id, assetId: a.id }); }
+  }
+});
+
 // ---- embeddings for semantic search, related pages and the assistant
 export function chunk(md, size = 1200) {
   const paras = md.split(/\n{2,}/);

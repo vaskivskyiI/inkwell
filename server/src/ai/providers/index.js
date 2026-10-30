@@ -7,11 +7,11 @@ import { mock } from './mock.js';
 // Defaults per provider: chat, vision (handwriting / images) and embedding models.
 export const PROVIDER_TYPES = {
   ollama: { label: 'Ollama (self-hosted)', defaultBaseUrl: 'http://localhost:11434', needsKey: false, defaultModel: 'qwen2.5:7b-instruct', defaultVision: 'qwen2.5vl:7b', defaultEmbed: 'nomic-embed-text', local: true },
-  openai: { label: 'OpenAI', defaultBaseUrl: 'https://api.openai.com/v1', needsKey: true, defaultModel: 'gpt-4.1-mini', defaultVision: 'gpt-4.1-mini', defaultEmbed: 'text-embedding-3-small' },
+  openai: { label: 'OpenAI', defaultBaseUrl: 'https://api.openai.com/v1', needsKey: true, defaultModel: 'gpt-4.1-mini', defaultVision: 'gpt-4.1-mini', defaultEmbed: 'text-embedding-3-small', defaultAudio: 'whisper-1' },
   'openai-compatible': { label: 'OpenAI-compatible (LM Studio, vLLM, OpenRouter, …)', defaultBaseUrl: 'http://localhost:1234/v1', needsKey: false, defaultModel: '', defaultVision: '', defaultEmbed: '' },
   anthropic: { label: 'Anthropic Claude', defaultBaseUrl: 'https://api.anthropic.com', needsKey: true, defaultModel: 'claude-haiku-5-5', defaultVision: 'claude-sonnet-5-5', defaultEmbed: null },
-  gemini: { label: 'Google Gemini', defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta', needsKey: true, defaultModel: 'gemini-2.5-flash', defaultVision: 'gemini-2.5-flash', defaultEmbed: 'gemini-embedding-001' },
-  mock: { label: 'Built-in demo (no real AI, for testing)', defaultBaseUrl: '', needsKey: false, defaultModel: 'mock', defaultVision: 'mock', defaultEmbed: 'mock', local: true, hidden: true },
+  gemini: { label: 'Google Gemini', defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta', needsKey: true, defaultModel: 'gemini-2.5-flash', defaultVision: 'gemini-2.5-flash', defaultEmbed: 'gemini-embedding-001', defaultAudio: 'gemini-2.5-flash' },
+  mock: { label: 'Built-in demo (no real AI, for testing)', defaultBaseUrl: '', needsKey: false, defaultModel: 'mock', defaultVision: 'mock', defaultEmbed: 'mock', defaultAudio: 'mock', local: true, hidden: true },
 };
 
 export function makeProvider({ type, baseUrl, apiKey }) {

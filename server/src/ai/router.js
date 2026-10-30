@@ -1,4 +1,4 @@
-// Which provider and model does a task use? tasks: chat (text), vision (handwriting, images), embed.
+// Which provider and model does a task use? tasks: chat (text), vision (handwriting, images), embed, audio (speech to text).
 // Sources, in order: the user's own providers, server-wide providers (admin), the operator's INKWELL_AI_* env.
 // A space with `localAiOnly` only ever reaches providers on this machine / the private network.
 import { one, many } from '../db/index.js';
@@ -24,6 +24,7 @@ const defaultModel = (p, task) => {
   const t = PROVIDER_TYPES[p.type] || {};
   if (p.models?.[task]) return p.models[task];
   if (task === 'embed') return t.defaultEmbed;
+  if (task === 'audio') return t.defaultAudio;
   if (task === 'vision') return t.defaultVision || t.defaultModel;
   return t.defaultModel;
 };

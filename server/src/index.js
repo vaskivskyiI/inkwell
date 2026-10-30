@@ -17,6 +17,8 @@ import aiRoutes from './routes/ai.js';
 import linkRoutes from './links.js';
 import halcyonRoutes from './integrations/halcyon.js';
 import importRoutes from './importers/index.js';
+import commentRoutes from './comments.js';
+import { pullAll } from './tasksync.js';
 import { handleSocket, stopCollab } from './collab.js';
 import { initEvents, addClient } from './events.js';
 import { startQueue, stopQueue } from './ai/queue.js';
@@ -60,6 +62,7 @@ export async function buildServer() {
   await app.register(linkRoutes);
   await app.register(halcyonRoutes);
   await app.register(importRoutes);
+  await app.register(commentRoutes);
 
   // Page content (Yjs / Hocuspocus protocol). Native apps pass ?token=<api token>.
   app.register(async (scope) => {
@@ -98,6 +101,8 @@ function housekeeping() {
   const run = () => { purgeTrash().catch((e) => log.warn('trash purge', e.message)); deleteOrphanFiles().catch((e) => log.warn('orphan files', e.message)); };
   setTimeout(run, 60e3).unref();
   setInterval(run, 6 * 3600e3).unref();
+  // Tasks completed in Halcyon tick their to-dos here.
+  setInterval(() => pullAll().catch((e) => log.warn('task pull', e.message)), 5 * 60e3).unref();
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

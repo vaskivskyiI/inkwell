@@ -10,6 +10,7 @@ import { extract, docFrom } from './docmodel.js';
 import { publish } from './events.js';
 import { enqueue } from './ai/queue.js';
 import { logger } from './util/log.js';
+import { queueOutgoing } from './tasksync.js';
 
 const log = logger('collab');
 const VERSION_EVERY = 10 * 60e3;
@@ -62,6 +63,7 @@ export async function persist(noteId, doc, userId) {
     // Handwriting is read soon after the pen pauses — the transcription is what makes ink searchable.
     for (const c of info.canvases) if (done[c.id] !== c.hash) await enqueue(owner, 'ink', `${noteId}:${c.id}`, { delay: Math.min(config.aiDelay, 8), priority: 3 });
   }
+  if (owner) await queueOutgoing(owner, noteId, doc).catch((e) => log.warn('task sync', e.message));
   publish(prev.space_id, 'note:updated', { note: { id: noteId, title: info.title, tags: info.tags, updatedAt: t, updatedBy: userId } });
   return info;
 }

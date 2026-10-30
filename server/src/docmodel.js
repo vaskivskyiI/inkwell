@@ -90,6 +90,12 @@ function blockMd(el, ctx) {
       const line = (r) => `| ${Array.from({ length: w }, (_, i) => r[i] || '').join(' | ')} |`;
       return [line(rows[0]), `|${' --- |'.repeat(w)}`, ...rows.slice(1).map(line)].join('\n');
     }
+    case 'audioBlock': {
+      const m = /\/api\/assets\/([0-9a-f-]{36})/.exec(el.getAttribute('src') || '');
+      if (m) ctx.assets?.add(m[1]);
+      const t = m && ctx.assetText?.(m[1]);
+      return ctx.plain ? t || '' : `🎙️ *(recording)*${t ? `\n${prefixLines(t, '> ', '> ')}` : ''}`;
+    }
     case 'inkBlock': {
       const id = el.getAttribute('id');
       ctx.inkIds?.add(id);
@@ -112,6 +118,30 @@ export function strokesOf(ydoc, canvasId) {
 export const strokesHash = (strokes) => sha256(strokes.map((s) => s.id).join(','));
 
 export const WHOLE_PAGE_CANVASES = ['page', 'overlay'];
+
+function walkTasks(el, fn) {
+  for (const c of el.toArray?.() || []) {
+    if (c instanceof Y.XmlElement) { if (c.nodeName === 'taskItem') fn(c); walkTasks(c, fn); }
+  }
+}
+const itemText = (item) => { const p = item.get(0); return p?.toArray ? inlineMd(p, { plain: true }).trim() : ''; };
+
+/** All to-dos of a page: { text, checked }. */
+export function todosOf(ydoc) {
+  const out = [];
+  walkTasks(ydoc.getXmlFragment('default'), (i) => out.push({ text: itemText(i), checked: !!i.getAttribute('checked') }));
+  return out;
+}
+
+/** Ticks or unticks the to-do with this text; true when something changed. */
+export function setTodoChecked(ydoc, text, checked) {
+  let changed = false;
+  const want = String(text).trim().toLowerCase();
+  walkTasks(ydoc.getXmlFragment('default'), (i) => {
+    if (itemText(i).toLowerCase() === want && !!i.getAttribute('checked') !== checked) { i.setAttribute('checked', checked); changed = true; }
+  });
+  return changed;
+}
 
 /** Tags the user added by hand live in the doc (meta.tags, a Y.Array) so they sync like everything else. */
 export function manualTags(ydoc) {
