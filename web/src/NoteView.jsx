@@ -50,6 +50,7 @@ export function NoteView({ id }) {
         store.set((s) => ({ inkText: { ...s.inkText, [id]: { ...(s.inkText[id] || {}), [m.canvasId]: { text: m.text, data: m.data } } } }));
       }
       if (m.type === 'note:links' && m.noteId === id) loadDetail().catch(() => {});
+      if (m.type === 'note:updated' && m.note?.id === id && m.note.updatedAt) setDetail((d) => d && { ...d, updatedAt: m.note.updatedAt });
       if (m.type === 'note:removed' && m.ids.includes(id)) { toast('This page was moved to the trash'); navigate('#/'); }
     });
     return () => { clearTimeout(t); h.provider.off('synced', show); off(); meta.unobserve(onMeta); h.release(); };
@@ -64,6 +65,10 @@ export function NoteView({ id }) {
       <div className="note-scroll" id="note-scroll">
         <div className={detail.kind === 'journal' ? 'journal-col' : 'page-col'}>
           <TitleRow detail={detail} setDetail={setDetail} doc={handle.doc} readOnly={readOnly} />
+          <div className="note-dates">
+            <span title={new Date(detail.createdAt).toLocaleString()}>Created {stamp(detail.createdAt)}{detail.createdByUser ? ` by ${detail.createdByUser.name}` : ''}</span>
+            <span title={new Date(detail.updatedAt).toLocaleString()}>Edited {stamp(detail.updatedAt)}{detail.updatedByUser ? ` by ${detail.updatedByUser.name}` : ''}</span>
+          </div>
           {ready && <TagBar detail={detail} doc={handle.doc} readOnly={readOnly} />}
           {detail.deletedAt && <div className="banner">This page is in the trash. <button onClick={() => post(`/api/notes/${id}/restore`).then(loadDetail).catch(toastError)}>Restore</button></div>}
           {!ready ? <div className="note-loading"><span className="spinner" /></div>
@@ -80,6 +85,11 @@ export function NoteView({ id }) {
     </div>
   );
 }
+
+const stamp = (t) => {
+  const d = new Date(t), today = new Date().toDateString() === d.toDateString();
+  return today ? `today ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+};
 
 function Breadcrumbs({ detail }) {
   const spaces = useStore((s) => s.spaces);

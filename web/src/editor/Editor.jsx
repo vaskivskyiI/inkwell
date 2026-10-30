@@ -9,14 +9,14 @@ import { TaskList } from '@tiptap/extension-task-list';
 import { TaskItem } from '@tiptap/extension-task-item';
 import Highlight from '@tiptap/extension-highlight';
 import { TextStyle, Color } from '@tiptap/extension-text-style';
-import Image from '@tiptap/extension-image';
 import { TableKit } from '@tiptap/extension-table';
 import Typography from '@tiptap/extension-typography';
 import { Bold, Italic, Underline, Strikethrough, Code, Link2, Highlighter, Sparkles, ChevronDown, Check, X, RotateCcw, ClipboardCopy, CornerDownLeft, Replace } from 'lucide-react';
-import { InkBlock, Callout, PageMention, KeyCapture } from './extensions.js';
+import { InkBlock, Callout, PageMention, KeyCapture, SizedImage, HeadingFold, imageToInk, unfoldAll } from './extensions.js';
+import { BlockTools } from './BlockTools.jsx';
 import { SLASH, AI_ACTIONS, matchSlash } from './commands.js';
-import { post, stream, upload } from '../api.js';
-import { store, openNote, toast, toastError } from '../store.js';
+import { get, post, stream, upload } from '../api.js';
+import { store, useStore, navigate, openNote, toast, toastError } from '../store.js';
 import { Markdown } from '../ui/Markdown.jsx';
 import { sid } from '../ink/geometry.js';
 
@@ -28,6 +28,9 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
   const photoInput = useRef(null);
   const [trigger, setTrigger] = useState(null); // { type: 'slash'|'mention', from, query, coords }
   const [ai, setAi] = useState(null);
+  const wrap = useRef(null);
+  const chapter = useStore((s) => (s.route.name === 'n' ? s.route.query.h : null));
+  const [headings, setHeadings] = useState([]);
 
   // A photo (camera on phones) becomes a drawing block with the picture underneath, in the picture's proportions.
   async function insertPhoto(file) {
@@ -61,7 +64,7 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
       CollaborationCaret.configure({ provider, user: { name: user.name, color: user.color } }),
       Placeholder.configure({ placeholder: ({ node }) => (node.type.name === 'heading' ? 'Heading' : 'Write, or type “/” for blocks and AI, “[[” to link a page…') }),
       TaskList, TaskItem.configure({ nested: true }), Highlight.configure({ multicolor: true }), TextStyle, Color,
-      Image.configure({ inline: false, allowBase64: false }), TableKit.configure({ table: { resizable: true } }), Typography,
+      SizedImage.configure({ inline: false, allowBase64: false }), HeadingFold.configure({ noteId: note.id }), TableKit.configure({ table: { resizable: true } }), Typography,
       InkBlock.configure({ doc, noteId: note.id }), Callout, PageMention, KeyCapture.configure({ onKey: (e) => capture.current?.(e) }),
     ],
     editable: !readOnly,
@@ -86,8 +89,25 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
         files.forEach((f) => insertFile(f, pos));
         return true;
       },
+      // A pen near a picture makes it drawable right away.
+      handleDOMEvents: {
+        pointerover: (view, e) => {
+          if (e.pointerType !== 'pen' || e.target.tagName !== 'IMG' || !view.editable) return false;
+          const pos = view.posAtDOM(e.target, 0);
+          const at = view.state.doc.nodeAt(pos)?.type.name === 'image' ? pos : pos - 1;
+          const node = view.state.doc.nodeAt(at);
+          if (node?.type.name === 'image') imageToInk(view, at, node, e.target);
+          return false;
+        },
+      },
+      // Uploaded files open on a plain click (other links keep Ctrl+click while editing).
+      handleClick: (view, pos, event) => {
+        const a = event.target.closest?.('a[href^="/api/assets/"]');
+        if (a) { event.preventDefault(); window.open(a.href, '_blank', 'noopener'); return true; }
+        return false;
+      },
       handleClickOn: (view, pos, node, nodePos, event) => {
-        if (node.type.name === 'pageMention' && node.attrs.id) { event.preventDefault(); openNote(node.attrs.id); return true; }
+        if (node.type.name === 'pageMention' && node.attrs.id) { event.preventDefault(); navigate(`#/n/${node.attrs.id}${node.attrs.anchor ? `?h=${encodeURIComponent(node.attrs.anchor)}` : ''}`); return true; }
         const a = event.target.closest?.('a[href]');
         if (a && (event.ctrlKey || event.metaKey || readOnly)) { window.open(a.href, '_blank', 'noopener'); return true; }
         return false;
@@ -122,7 +142,7 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
     let m = /(?:^|\s)\/([\w-]{0,20})$/.exec(before);
     const coords = () => { const c = e.view.coordsAtPos(selection.from); return { left: c.left, top: c.bottom }; };
     if (m) { setTrigger({ type: 'slash', from: selection.from - m[1].length - 1, query: m[1], coords: coords(), index: 0 }); return; }
-    m = /\[\[([^\]\n]{0,40})$/.exec(before);
+    m = /\[\[([^\]\n]{0,80})$/.exec(before);
     if (m) { setTrigger({ type: 'mention', from: selection.from - m[1].length - 2, query: m[1], coords: coords(), index: 0 }); return; }
     setTrigger(null);
   }
@@ -175,12 +195,38 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
   const slashItems = useMemo(() => (trigger?.type === 'slash' ? matchSlash(SLASH, trigger.query) : []), [trigger?.type, trigger?.query]);
   const mentionItems = useMemo(() => {
     if (trigger?.type !== 'mention') return [];
-    const q = trigger.query.toLowerCase();
+    const [pagePart, chapterPart] = splitRef(trigger.query);
+    // "[[Page#" or "[[#": the chapters of that page (or of this one).
+    if (chapterPart !== null) {
+      const page = findPage(pagePart, note);
+      const c = chapterPart.toLowerCase();
+      return headings.filter((h) => h.text.toLowerCase().includes(c)).slice(0, 10).map((h) => ({ id: page.id, title: page.title, anchor: h.text, label: `${'  '.repeat(h.level - 1)}${h.text}`, icon: '§' }));
+    }
+    const q = pagePart.toLowerCase();
     const all = Object.values(store.get().trees).flat().filter((n) => n.id !== note.id && (n.title || 'Untitled').toLowerCase().includes(q));
-    const list = all.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8).map((n) => ({ id: n.id, label: n.title || 'Untitled', icon: n.icon }));
+    const list = all.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8).map((n) => ({ id: n.id, title: n.title || 'Untitled', label: n.title || 'Untitled', icon: n.icon }));
     if (trigger.query.trim()) list.push({ create: true, label: `Create “${trigger.query.trim()}”` });
     return list;
-  }, [trigger?.type, trigger?.query, note.id]);
+  }, [trigger?.type, trigger?.query, note.id, headings]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (trigger?.type !== 'mention') return;
+    const [pagePart, chapterPart] = splitRef(trigger.query);
+    if (chapterPart === null) return;
+    const page = findPage(pagePart, note);
+    if (page.id) get(`/api/notes/${page.id}/headings`).then(setHeadings).catch(() => setHeadings([]));
+  }, [trigger?.type, trigger?.query?.split('#')[0], trigger?.query?.includes('#')]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A link to a chapter: show it.
+  useEffect(() => {
+    if (!chapter || !editor) return undefined;
+    const t = setTimeout(() => {
+      unfoldAll(editor.view);
+      const h = [...editor.view.dom.querySelectorAll('h1,h2,h3')].find((x) => x.textContent.replace('▾', '').trim() === chapter);
+      h?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [chapter, editor]);
   const items = trigger?.type === 'slash' ? slashItems : mentionItems;
 
   const choose = async (item) => {
@@ -195,7 +241,7 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
         const n = await post('/api/notes', { spaceId: note.spaceId, parentId: note.id, title: t.query.trim() });
         target = { id: n.id, label: n.title };
       }
-      e.chain().focus().insertContent([{ type: 'pageMention', attrs: { id: target.id, title: target.label } }, { type: 'text', text: ' ' }]).run();
+      e.chain().focus().insertContent([{ type: 'pageMention', attrs: { id: target.id, title: target.title || target.label, anchor: target.anchor || null } }, { type: 'text', text: ' ' }]).run();
     }
   };
 
@@ -207,6 +253,12 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
       setTrigger((t) => ({ ...t, index: (t.index + d + items.length) % items.length }));
       return true;
     }
+    if (event.key === 'Tab' && trigger.type === 'mention' && items[trigger.index]?.id && !items[trigger.index].anchor) {
+      // Tab on a page: go on to its chapters.
+      const e = editorRef.current;
+      e.chain().focus().deleteRange({ from: trigger.from, to: e.state.selection.from }).insertContent(`[[${items[trigger.index].title}#`).run();
+      return true;
+    }
     if (event.key === 'Enter' || event.key === 'Tab') { choose(items[trigger.index] || items[0]); return true; }
     if (event.key === 'Escape') { setTrigger(null); return true; }
     return false;
@@ -214,8 +266,9 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
 
   if (!editor) return null;
   return (
-    <div className="editor-wrap">
+    <div className="editor-wrap" ref={wrap}>
       <EditorContent editor={editor} />
+      <BlockTools editor={editor} wrap={wrap} noteId={note.id} readOnly={readOnly} onComment={(quote) => window.dispatchEvent(new CustomEvent('inkwell:comment', { detail: { quote } }))} />
       <input ref={fileInput} type="file" hidden multiple onChange={(e) => { [...e.target.files].forEach((f) => insertFile(f)); e.target.value = ''; }} />
       {/* On phones `capture` opens the camera directly; on desktops it is a normal image picker. */}
       <input ref={photoInput} type="file" hidden accept="image/*" capture="environment" onChange={(e) => { const f = e.target.files[0]; if (f) insertPhoto(f); e.target.value = ''; }} />
@@ -229,10 +282,11 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
             return (
               <button key={it.id || it.label} className={i === trigger.index ? 'on' : ''} onMouseEnter={() => setTrigger((t) => ({ ...t, index: i }))} onClick={() => choose(it)}>
                 {typeof Icon === 'string' || !Icon ? <span className="emoji">{Icon || (it.create ? '＋' : '📄')}</span> : <Icon size={16} />}
-                <span>{it.label}</span>
+                <span style={{ whiteSpace: 'pre' }}>{it.label}</span>
               </button>
             );
           })}
+          {trigger.type === 'mention' && !splitRef(trigger.query)[1] && <div className="menu-hint">Tab: link to a chapter · “[[#” chapters of this page</div>}
         </div>
       )}
       {ai && <AiCard ai={ai} onClose={() => { ai.ctl?.abort(); setAi(null); editorRef.current?.commands.focus(); }} onApply={applyAi}
@@ -304,4 +358,12 @@ function AiCard({ ai, onClose, onApply, onRetry, onAnswer }) {
       {ai.busy && <div className="ai-card-actions"><button onClick={onClose}><Check size={15} /> Stop</button></div>}
     </div>
   );
+}
+
+// "[[Page#Chapter" → ['Page', 'Chapter']; no "#" → ['Page', null].
+function splitRef(q) { const i = q.indexOf('#'); return i < 0 ? [q, null] : [q.slice(0, i), q.slice(i + 1)]; }
+function findPage(name, note) {
+  if (!name.trim()) return { id: note.id, title: note.title || 'This page' };
+  const n = Object.values(store.get().trees).flat().find((x) => (x.title || '').toLowerCase() === name.trim().toLowerCase());
+  return n ? { id: n.id, title: n.title } : { id: null, title: name };
 }

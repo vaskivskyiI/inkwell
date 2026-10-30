@@ -272,6 +272,13 @@ export default async function noteRoutes(app) {
     }
   });
 
+  // Chapters of a page, for links to them.
+  app.get('/api/notes/:id/headings', async (req) => {
+    await needNote(req.user.id, req.params.id);
+    const md = extract(docFrom((await one('SELECT ydoc FROM notes WHERE id = $1', req.params.id)).ydoc)).markdown;
+    return [...md.matchAll(/^(#{1,3}) (.+)$/gm)].map((m) => ({ level: m[1].length, text: m[2].replace(/[*_`]/g, '').trim() }));
+  });
+
   // ---- versions
   app.get('/api/notes/:id/versions', async (req) => {
     await needNote(req.user.id, req.params.id);

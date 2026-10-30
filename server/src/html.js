@@ -24,14 +24,14 @@ function inline(el, ctx) {
         out += s;
       }
     } else if (c.nodeName === 'hardBreak') out += '<br>';
-    else if (c.nodeName === 'pageMention') out += `<span class="mention">${esc(c.getAttribute('title'))}</span>`;
+    else if (c.nodeName === 'pageMention') out += `<span class="mention">${esc(c.getAttribute('title'))}${c.getAttribute('anchor') ? ` › ${esc(c.getAttribute('anchor'))}` : ''}</span>`;
     else if (c.nodeName === 'image') out += img(c, ctx);
     else out += inline(c, ctx);
   }
   return out;
 }
 
-const img = (c, ctx) => `<img src="${esc(ctx.asset(safeUrl(c.getAttribute('src'))))}" alt="${esc(c.getAttribute('alt'))}"${c.getAttribute('width') ? ` width="${esc(c.getAttribute('width'))}"` : ''}>`;
+const img = (c, ctx) => `<img src="${esc(ctx.asset(safeUrl(c.getAttribute('src'))))}" alt="${esc(c.getAttribute('alt'))}"${c.getAttribute('width') ? ` style="width:${Number(c.getAttribute('width')) || 100}%"` : ''}>`;
 const kids = (el, ctx) => el.toArray().map((c) => block(c, ctx)).join('\n');
 
 function block(el, ctx) {

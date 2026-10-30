@@ -34,7 +34,11 @@ function inlineMd(el, ctx) {
     } else if (c instanceof Y.XmlElement) {
       const n = c.nodeName;
       if (n === 'hardBreak') out += ctx.plain ? '\n' : '  \n';
-      else if (n === 'pageMention') { out += ctx.plain ? c.getAttribute('title') || '' : `[[${c.getAttribute('title') || ''}]]`; ctx.mentions?.add(c.getAttribute('id')); }
+      else if (n === 'pageMention') {
+        const label = `${c.getAttribute('title') || ''}${c.getAttribute('anchor') ? `#${c.getAttribute('anchor')}` : ''}`;
+        out += ctx.plain ? label : `[[${label}]]`;
+        ctx.mentions?.add(c.getAttribute('id'));
+      }
       else if (n === 'image') out += imageMd(c, ctx);
       else out += inlineMd(c, ctx);
     }
