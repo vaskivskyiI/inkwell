@@ -27,6 +27,12 @@ async function assetTexts(ids) {
   return Object.fromEntries((await many('SELECT id, ai_text FROM assets WHERE id = ANY($1::uuid[]) AND ai_text IS NOT NULL', ids)).map((r) => [r.id, r.ai_text]));
 }
 
+/** The files a page uses, kept in step with its content. */
+export async function syncAssetRefs(noteId, assets) {
+  await q('DELETE FROM asset_refs WHERE note_id = $1 AND NOT (asset_id = ANY($2::uuid[]))', noteId, assets);
+  if (assets.length) await q('INSERT INTO asset_refs (asset_id, note_id) SELECT id, $1 FROM assets WHERE id = ANY($2::uuid[]) ON CONFLICT DO NOTHING', noteId, assets);
+}
+
 /** Derives everything from the doc and saves it. Exported for tests and for jobs that change derived data (ink text). */
 export async function persist(noteId, doc, userId) {
   const prev = await one('SELECT space_id, title, content_hash, updated_at, kind FROM notes WHERE id = $1', noteId);
@@ -44,6 +50,7 @@ export async function persist(noteId, doc, userId) {
     await q(`UPDATE notes SET ydoc = $2, title = $3, text_content = $4, tags = $5, content_hash = $6,
       search = setweight(to_tsvector('simple', $3), 'A') || setweight(to_tsvector('simple', $4), 'B'),
       updated_at = $7, updated_by = coalesce($8, updated_by) WHERE id = $1`, noteId, state, info.title, info.text, info.tags, info.hash, t, userId || null);
+    await syncAssetRefs(noteId, info.assets);
     // Page mentions become backlinks.
     await q("DELETE FROM note_links WHERE note_id = $1 AND kind = 'mention' AND NOT (ref = ANY($2::text[]))", noteId, info.mentions);
     for (const m of info.mentions) {

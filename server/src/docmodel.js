@@ -25,6 +25,8 @@ function inlineMd(el, ctx) {
         if (typeof op.insert !== 'string') continue;
         let s = op.insert;
         const a = op.attributes || {};
+        const file = /\/api\/assets\/([0-9a-f-]{36})/.exec(a.link?.href || '');
+        if (file) ctx.assets?.add(file[1]);
         if (ctx.plain) { out += s; continue; }
         for (const [m, w] of Object.entries(MARK_WRAP)) if (a[m] && s.trim()) s = s.replace(/^(\s*)(.*?)(\s*)$/s, `$1${w}$2${w}$3`);
         if (a.link?.href) s = `[${s}](${a.link.href})`;

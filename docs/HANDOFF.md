@@ -15,7 +15,7 @@ MCP endpoint (no Halcyon changes needed for the Inkwell → Halcyon direction).
 
 ## 2. State
 - 3 commits. Server + web UI implement everything in docs/PLAN.md §2 except the roadmap items.
-- Tests: `npm test` 55/55 (incl. AFFiNE snapshot and Markdown-zip import) (unit, API, real-WebSocket collaboration, AI with mock provider, fake Halcyon MCP).
+- Tests: `npm test` 57/57 (incl. AFFiNE snapshot and Markdown-zip import) (unit, API, real-WebSocket collaboration, AI with mock provider, fake Halcyon MCP).
   `npm run test:pg -w server`: API 12/12 + AI 7/7 through the production `pg` driver (PGlite wire server).
 - UI checked in the desktop app's browser: sign-up, home, editor (collab load, slash menu, ink block, drawing),
   background handwriting recognition shown under the ink, AI panel (summary, tags, action items, handwriting),
@@ -85,3 +85,9 @@ MCP endpoint (no Halcyon changes needed for the Inkwell → Halcyon direction).
 - Recordings: `audioBlock`, job `transcribe`, AI task `audio` (OpenAI/OpenAI-compatible Whisper, Gemini; not Ollama, not Anthropic). PDFs: pages rendered in the browser to pictures on inkBlocks, text saved via `PUT /api/assets/:id/text`, limit 150 pages.
 - Review: `POST /api/ai/review`. PWA: `web/public` (manifest, `sw.js`: shell only, never `/api`); needs https.
 - Not tried on real hardware or services: pen hover, recording on a phone, real Whisper/Gemini transcription, real Halcyon task sync, PWA install on a phone.
+
+### 2026-10-30: file lifecycle
+- `asset_refs` (migration 3) lists which pages use which file, kept up to date by `persist`/`createNote`; old pages are backfilled once by `collectAssets`.
+- Same bytes in a space reuse one `assets` row; across spaces rows differ but the file on disk is shared by sha256.
+- `collectAssets` (every 6 h): a file without references is marked and removed after `INKWELL_ASSET_GRACE_DAYS` (default 7). Trashed pages still count; version snapshots do not, so restoring an old version can show a missing file after that time.
+- Reading a file: member of its space, or of a space with a page that uses it.

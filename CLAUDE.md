@@ -24,7 +24,7 @@ Halcyon's MCP endpoint). Browser first; native Windows/Android apps later use th
 ## Commands
 ```bash
 npm install && npm run build && npm start      # :8080 (on this Windows box 8080 is reserved — use INKWELL_PORT=8090)
-npm test                                      # 55 tests, in-memory PGlite, mock AI, real WebSockets
+npm test                                      # 57 tests, in-memory PGlite, mock AI, real WebSockets
 npm run test:pg -w server                     # API + AI tests via the pg driver
 ./deploy/podman-pod.sh up [--with-ollama]
 ```

@@ -11,7 +11,7 @@ import { openDb, closeDb, q } from './db/index.js';
 import authRoutes, { authenticate, userForToken, publicUser, requireUser } from './auth.js';
 import spaceRoutes from './spaces.js';
 import noteRoutes, { purgeTrash } from './notes.js';
-import assetRoutes, { deleteOrphanFiles } from './assets.js';
+import assetRoutes, { deleteOrphanFiles, collectAssets } from './assets.js';
 import searchRoutes from './search.js';
 import aiRoutes from './routes/ai.js';
 import linkRoutes from './links.js';
@@ -98,7 +98,7 @@ export async function buildServer() {
 }
 
 function housekeeping() {
-  const run = () => { purgeTrash().catch((e) => log.warn('trash purge', e.message)); deleteOrphanFiles().catch((e) => log.warn('orphan files', e.message)); };
+  const run = () => { purgeTrash().catch((e) => log.warn('trash purge', e.message)); collectAssets().then(deleteOrphanFiles).catch((e) => log.warn('unused files', e.message)); };
   setTimeout(run, 60e3).unref();
   setInterval(run, 6 * 3600e3).unref();
   // Tasks completed in Halcyon tick their to-dos here.

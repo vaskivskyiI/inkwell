@@ -245,3 +245,66 @@ test('repeating tasks: one completion per tick, a moved due date ticks the to-do
     assert.equal(completions, 1);
   } finally { fake.close(); await ann.del('/api/integrations/halcyon'); }
 });
+
+test('files: one copy per upload, removed only when no page uses them any more', async () => {
+  const fsp = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { config } = await import('../src/config.js');
+  const { collectAssets } = await import('../src/assets.js');
+  const up = async (noteId, name, content = 'same bytes') => {
+    const b = 'b1';
+    const body = `--${b}\r\nContent-Disposition: form-data; name="noteId"\r\n\r\n${noteId}\r\n--${b}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: application/pdf\r\n\r\n${content}\r\n--${b}--\r\n`;
+    return JSON.parse((await app.inject({ method: 'POST', url: '/api/assets', payload: body, headers: { cookie: ann.cookie, 'content-type': `multipart/form-data; boundary=${b}` } })).body);
+  };
+  const addLink = (id, a) => ann.post(`/api/notes/${id}/append`, { markdown: `[📎 ${a.name}](${a.url})` });
+  const n1 = await ann.post('/api/notes', { spaceId: work(), title: 'Files 1' });
+  const n2 = await ann.post('/api/notes', { spaceId: work(), title: 'Files 2' });
+  const a = await up(n1.id, 'report.pdf');
+  const b = await up(n2.id, 'copy of report.pdf');
+  assert.equal(b.id, a.id, 'the same file in a space is one record');
+  assert.equal(b.name, 'copy of report.pdf', 'the link keeps the name it was uploaded with');
+  const { one } = await import('../src/db/index.js');
+  const { sha256 } = await one('SELECT sha256 FROM assets WHERE id = $1', a.id);
+  const file = path.join(config.assetsDir, sha256.slice(0, 2), sha256);
+  await addLink(n1.id, a);
+  await addLink(n2.id, b);
+  await collectAssets({ graceMs: 0 });
+  assert.equal((await ann.get(`/api/notes/${n1.id}/export`)).includes(a.url), true);
+  assert.ok(await fsp.stat(file), 'in use: kept');
+  // First page drops it: the other still uses it.
+  const { withDoc } = await import('../src/collab.js');
+  const clear = (id) => withDoc(id, (d) => { const f = d.getXmlFragment('default'); f.delete(0, f.length); }, ann.user);
+  await clear(n1.id);
+  await collectAssets({ graceMs: 0 });
+  assert.ok(await fsp.stat(file), 'one page still uses it');
+  // In the trash it still counts; gone for good it does not.
+  await ann.del(`/api/notes/${n2.id}`);
+  await collectAssets({ graceMs: 0 });
+  assert.ok(await fsp.stat(file), 'restorable from the trash');
+  await ann.del(`/api/notes/${n2.id}?permanent=1`);
+  await collectAssets({ graceMs: 864e5 });
+  assert.ok(await fsp.stat(file), 'grace period');
+  assert.equal((await collectAssets({ graceMs: 0 })).removed, 1);
+  await assert.rejects(fsp.stat(file));
+  assert.equal(await ann.status('GET', a.url), 404);
+  // Used again during the grace period: stays.
+  const c = await up(n1.id, 'new.pdf', 'other bytes');
+  await collectAssets({ graceMs: 864e5 });
+  await addLink(n1.id, c);
+  assert.equal((await collectAssets({ graceMs: 0 })).removed, 0);
+  assert.equal(await ann.status('GET', c.url), 200);
+});
+
+test('a page moved to another space keeps its files readable there', async () => {
+  const bob2 = await signup(app, 'carol@test.local', 'Carol');
+  const team = await ann.post('/api/spaces', { name: 'Moved to' });
+  await ann.post(`/api/spaces/${team.id}/members`, { email: 'carol@test.local', role: 'editor' });
+  const n = await ann.post('/api/notes', { spaceId: work(), title: 'Mover file' });
+  const b = 'b2';
+  const body = `--${b}\r\nContent-Disposition: form-data; name="noteId"\r\n\r\n${n.id}\r\n--${b}\r\nContent-Disposition: form-data; name="file"; filename="x.pdf"\r\nContent-Type: application/pdf\r\n\r\nmover\r\n--${b}--\r\n`;
+  const a = JSON.parse((await app.inject({ method: 'POST', url: '/api/assets', payload: body, headers: { cookie: ann.cookie, 'content-type': `multipart/form-data; boundary=${b}` } })).body);
+  await ann.post(`/api/notes/${n.id}/append`, { markdown: `[f](${a.url})` });
+  assert.equal(await bob2.status('GET', a.url), 404);
+  await ann.patch(`/api/notes/${n.id}`, { spaceId: team.id });
+  assert.equal(await bob2.status('GET', a.url), 200);
+});

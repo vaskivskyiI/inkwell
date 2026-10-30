@@ -1,18 +1,25 @@
-// Uploaded files (images, attachments). Content-addressed on disk (<assets>/<ab>/<sha256>), so duplicates are stored
-// once; access follows the space the file belongs to.
+// Uploaded files (images, attachments). Content-addressed on disk (<assets>/<ab>/<sha256>), so identical files are
+// stored once; within a space the same upload also reuses its record (and what AI read from it). asset_refs says which
+// pages use a file: members of those pages' spaces may read it, and a file no page uses is removed after a grace
+// period, which keeps undo, offline devices and just-uploaded files safe.
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { one, q, now } from './db/index.js';
+import { one, many, q, now } from './db/index.js';
 import { config } from './config.js';
 import { fail, str, isUuid, uuidOr404 } from './util/http.js';
-import { needSpace, needNote } from './spaces.js';
+import { needSpace, needNote, userSpaceIds } from './spaces.js';
+import { docFrom, extract } from './docmodel.js';
+import { syncAssetRefs } from './collab.js';
+import { getServerSetting, setServerSetting } from './settings.js';
+import { logger } from './util/log.js';
 import { enqueue } from './ai/queue.js';
 
 // Shown inline; everything else downloads (an uploaded HTML/SVG must never run as a page of this origin).
 const INLINE = /^(image\/(png|jpeg|gif|webp|avif)|video\/(mp4|webm)|audio\/(mpeg|ogg|wav|webm|mp4)|application\/pdf)$/;
 
+const log = logger('assets');
 const fileOf = (sha) => path.join(config.assetsDir, sha.slice(0, 2), sha);
 
 export async function storeAsset({ spaceId, noteId, userId, name, mime, data }) {
@@ -23,6 +30,8 @@ export async function storeAsset({ spaceId, noteId, userId, name, mime, data }) 
     await fsp.writeFile(`${file}.tmp`, data);
     await fsp.rename(`${file}.tmp`, file);
   }
+  const same = await one('SELECT * FROM assets WHERE space_id = $1 AND sha256 = $2 ORDER BY created_at LIMIT 1', spaceId, sha);
+  if (same) return { ...same, name: str(name, 200) || same.name };
   const a = await one('INSERT INTO assets (space_id, note_id, user_id, name, mime, size, sha256, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
     spaceId, noteId || null, userId, str(name, 200), str(mime, 100).split(';')[0] || 'application/octet-stream', data.length, sha, now());
   if (/^image\/(png|jpeg|gif|webp)$/.test(a.mime) && data.length < 15e6) await enqueue(userId, 'image', a.id, { delay: 2, priority: 6 });
@@ -31,6 +40,13 @@ export async function storeAsset({ spaceId, noteId, userId, name, mime, data }) 
 }
 
 export const readAsset = (a) => fsp.readFile(fileOf(a.sha256));
+
+async function canRead(userId, a) {
+  const spaces = await userSpaceIds(userId);
+  if (spaces.includes(a.space_id)) return true;
+  // A page that moved to another space takes its files along for that space's members.
+  return !!(await one('SELECT 1 FROM asset_refs r JOIN notes n ON n.id = r.note_id WHERE r.asset_id = $1 AND n.space_id = ANY($2::uuid[]) LIMIT 1', a.id, spaces));
+}
 
 function send(reply, a) {
   reply.header('content-type', a.mime);
@@ -58,8 +74,8 @@ export default async function assetRoutes(app) {
 
   // What a client already knows about a file (the text of a PDF page, the transcript shown for a recording).
   app.get('/api/assets/:id/text', async (req) => {
-    const a = await one('SELECT space_id, ai_text FROM assets WHERE id = $1', uuidOr404(req.params.id)) || fail(404, 'Not found');
-    await needSpace(req.user.id, a.space_id);
+    const a = await one('SELECT id, space_id, ai_text FROM assets WHERE id = $1', uuidOr404(req.params.id)) || fail(404, 'Not found');
+    if (!(await canRead(req.user.id, a))) fail(404, 'Not found');
     return { text: a.ai_text || '' };
   });
   app.put('/api/assets/:id/text', async (req) => {
@@ -71,27 +87,54 @@ export default async function assetRoutes(app) {
 
   app.get('/api/assets/:id', async (req, reply) => {
     const a = await one('SELECT * FROM assets WHERE id = $1', uuidOr404(req.params.id));
-    if (!a) fail(404, 'Not found');
-    await needSpace(req.user.id, a.space_id);
+    if (!a || !(await canRead(req.user.id, a))) fail(404, 'Not found');
     return send(reply, a);
   });
 
   // Images of a page shared by public link.
   app.get('/api/public/:slug/assets/:id', async (req, reply) => {
-    const a = await one(`SELECT a.* FROM assets a JOIN notes n ON n.id = a.note_id
+    const a = await one(`SELECT a.* FROM assets a JOIN asset_refs r ON r.asset_id = a.id JOIN notes n ON n.id = r.note_id
       WHERE a.id = $1 AND n.public_slug = $2 AND n.deleted_at IS NULL`, uuidOr404(req.params.id), str(req.params.slug, 40));
     if (!a) fail(404, 'Not found');
     return send(reply, a);
   });
 }
 
+// Pages saved before references existed.
+async function backfillRefs() {
+  if (await getServerSetting('assetRefsDone', false)) return;
+  let last = '00000000-0000-0000-0000-000000000000';
+  for (;;) {
+    const rows = await many('SELECT id, ydoc FROM notes WHERE id > $1 AND ydoc IS NOT NULL ORDER BY id LIMIT 200', last);
+    if (!rows.length) break;
+    for (const n of rows) await syncAssetRefs(n.id, extract(docFrom(n.ydoc)).assets);
+    last = rows.at(-1).id;
+  }
+  await setServerSetting('assetRefsDone', true);
+}
+
+/** Removes files no page has used for the grace period; a page in the trash still counts as using them. */
+export async function collectAssets({ graceMs = config.assetGraceDays * 864e5 } = {}) {
+  await backfillRefs();
+  const t = now();
+  await q('UPDATE assets a SET orphaned_at = NULL WHERE orphaned_at IS NOT NULL AND EXISTS (SELECT 1 FROM asset_refs r WHERE r.asset_id = a.id)');
+  await q('UPDATE assets a SET orphaned_at = $1 WHERE orphaned_at IS NULL AND NOT EXISTS (SELECT 1 FROM asset_refs r WHERE r.asset_id = a.id)', t);
+  const gone = (await q('DELETE FROM assets WHERE orphaned_at IS NOT NULL AND orphaned_at <= $1 RETURNING sha256', t - graceMs)).rows;
+  for (const sha of new Set(gone.map((r) => r.sha256))) {
+    if (!(await one('SELECT 1 FROM assets WHERE sha256 = $1 LIMIT 1', sha))) await fsp.unlink(fileOf(sha)).catch(() => {});
+  }
+  if (gone.length) log.info(`removed ${gone.length} unused file(s)`);
+  return { removed: gone.length };
+}
+
 export async function deleteOrphanFiles() {
-  // Files whose last asset row is gone (space deleted). Runs rarely; cheap enough to list the directory.
+  // Files whose last record is gone (a deleted space). Recent ones may be an upload in progress.
   const dirs = fs.existsSync(config.assetsDir) ? await fsp.readdir(config.assetsDir) : [];
   for (const d of dirs) {
     for (const f of await fsp.readdir(path.join(config.assetsDir, d))) {
-      if (f.endsWith('.tmp')) continue;
-      if (!(await one('SELECT 1 FROM assets WHERE sha256 = $1 LIMIT 1', f))) await fsp.unlink(path.join(config.assetsDir, d, f)).catch(() => {});
+      const file = path.join(config.assetsDir, d, f);
+      if (f.endsWith('.tmp') || now() - (await fsp.stat(file)).mtimeMs < 36e5) continue;
+      if (!(await one('SELECT 1 FROM assets WHERE sha256 = $1 LIMIT 1', f))) await fsp.unlink(file).catch(() => {});
     }
   }
 }

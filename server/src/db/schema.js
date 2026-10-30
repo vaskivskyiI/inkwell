@@ -224,6 +224,17 @@ const MIGRATIONS = [
   );
   CREATE INDEX notifications_user ON notifications(user_id, read, created_at DESC);
   `,
+  // 3 — which pages use which file; files nobody uses are removed after a grace period
+  `
+  CREATE TABLE asset_refs (
+    asset_id uuid NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    note_id uuid NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    PRIMARY KEY (asset_id, note_id)
+  );
+  CREATE INDEX asset_refs_note ON asset_refs(note_id);
+  ALTER TABLE assets ADD COLUMN orphaned_at bigint;
+  CREATE INDEX assets_sha ON assets(space_id, sha256);
+  `,
 ];
 
 export async function migrate(db) {

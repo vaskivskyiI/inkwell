@@ -31,6 +31,8 @@ export const config = {
   aiDelay: num(env.INKWELL_AI_DELAY, 45),
   maxUpload: num(env.INKWELL_MAX_UPLOAD_MB, 50) * 1024 * 1024,
   maxImport: num(env.INKWELL_MAX_IMPORT_MB, 500) * 1024 * 1024,
+  // Days a file stays after the last page stopped using it (undo, offline devices, recent version restores).
+  assetGraceDays: num(env.INKWELL_ASSET_GRACE_DAYS, 7),
   demo: bool(env.INKWELL_DEMO),
   logLevel: env.INKWELL_LOG_LEVEL || 'info',
   // Optional server-wide AI provider configured by the operator (users can add their own in Settings).

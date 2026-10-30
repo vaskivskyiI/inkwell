@@ -9,7 +9,7 @@ import { publish } from './events.js';
 import { buildDoc, encode, docFrom, markdownToBlocks, appendBlocks, setTitle, extract } from './docmodel.js';
 import { pageHtml } from './html.js';
 import { TEMPLATES, WELCOME_MD } from './templates.js';
-import { withDoc, recognitionsOf } from './collab.js';
+import { withDoc, recognitionsOf, syncAssetRefs } from './collab.js';
 import { getSettings } from './settings.js';
 import { enqueue } from './ai/queue.js';
 import { config } from './config.js';
@@ -48,6 +48,7 @@ export async function createNote(userId, { spaceId, parentId = null, afterId, ki
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, '', setweight(to_tsvector('simple', $5), 'A') || setweight(to_tsvector('simple', $7), 'B'), $11, $11, $12, $12) RETURNING *`,
   spaceId, parentId, await positionFor(spaceId, parentId, afterId), kind === 'journal' ? 'journal' : 'page', str(title, 300), str(icon, 8),
   info.text, info.tags, journalDate, encode(doc), userId, now());
+  await syncAssetRefs(n.id, info.assets);
   publish(spaceId, 'note:created', { note: noteOut(n) });
   // Imported / templated content is analysed like typed content.
   if (info.text.trim().length > 40) {
@@ -150,7 +151,6 @@ export default async function noteRoutes(app) {
       await tx(async () => {
         await q('UPDATE notes SET space_id = $2, parent_id = NULL, position = $3 WHERE id = $1', n.id, b.spaceId, await positionFor(b.spaceId, null, undefined));
         await q('UPDATE notes SET space_id = $2 WHERE id = ANY($1::uuid[])', ids, b.spaceId);
-        await q('UPDATE assets SET space_id = $2 WHERE note_id = ANY($1::uuid[])', ids, b.spaceId);
       });
       publish(n.space_id, 'note:removed', { ids });
       publish(b.spaceId, 'tree:changed', {});
@@ -213,6 +213,7 @@ export default async function noteRoutes(app) {
     const copy = await one(`INSERT INTO notes (space_id, parent_id, position, kind, title, icon, text_content, tags, ydoc, search, created_by, updated_by, created_at, updated_at)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, setweight(to_tsvector('simple', $5), 'A') || setweight(to_tsvector('simple', $7), 'B'), $10, $10, $11, $11) RETURNING *`,
     n.space_id, n.parent_id, await positionFor(n.space_id, n.parent_id, n.id), src.kind, title, src.icon, src.text_content, src.tags, encode(doc), req.user.id, now());
+    await syncAssetRefs(copy.id, extract(doc).assets);
     publish(n.space_id, 'note:created', { note: noteOut(copy) });
     return noteOut(copy);
   });

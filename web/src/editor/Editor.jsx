@@ -140,11 +140,13 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
       },
       // Uploaded files open on a plain click (other links keep Ctrl+click while editing).
       handleClick: (view, pos, event) => {
+        if (event.button !== 0) return false; // right click belongs to the block menu
         const a = event.target.closest?.('a[href^="/api/assets/"]');
         if (a) { event.preventDefault(); window.open(a.href, '_blank', 'noopener'); return true; }
         return false;
       },
       handleClickOn: (view, pos, node, nodePos, event) => {
+        if (event.button !== 0) return false;
         if (node.type.name === 'pageMention' && node.attrs.id) { event.preventDefault(); navigate(`#/n/${node.attrs.id}${node.attrs.anchor ? `?h=${encodeURIComponent(node.attrs.anchor)}` : ''}`); return true; }
         const a = event.target.closest?.('a[href]');
         if (a && (event.ctrlKey || event.metaKey || readOnly)) { window.open(a.href, '_blank', 'noopener'); return true; }

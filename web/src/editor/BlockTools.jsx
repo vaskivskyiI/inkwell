@@ -2,7 +2,7 @@
 // move, duplicate, delete, plus what fits the block: image size, table rows, heading links), and a bar over tables.
 import { useEffect, useRef, useState } from 'react';
 import { GripVertical, Type, Heading1, Heading2, Heading3, List, ListOrdered, ListChecks, Quote, Code, Lightbulb, Copy, Trash2, ArrowUp, ArrowDown, Link2, ExternalLink, PenLine, Unlink, MessageSquarePlus,
-  ChevronsDownUp, Rows3, Columns3, Table2 } from 'lucide-react';
+  ChevronsDownUp, Rows3, Columns3, Table2, Download } from 'lucide-react';
 import { toast } from '../store.js';
 import { imageToInk, toggleFold } from './extensions.js';
 
@@ -38,7 +38,14 @@ function buildMenu(editor, at, target, { noteId, onComment }) {
     groups.push({ title: 'Turn into', items: TURN.map(([label, icon, run]) => ({ label, icon, run: () => { const c = editor.chain().focus(); if (at > 0) c.setTextSelection(Math.min(at, state.doc.content.size - 1)); run(c).run(); } })) });
   }
   const link = target?.closest?.('a[href]');
-  if (link && !link.dataset.pageMention) {
+  const isFile = link?.getAttribute('href')?.startsWith('/api/assets/');
+  if (isFile) {
+    groups.push({ title: 'File', items: [
+      { label: 'Open', icon: ExternalLink, run: () => window.open(link.href, '_blank', 'noopener') },
+      { label: 'Download', icon: Download, run: () => { const a = document.createElement('a'); a.href = link.href; a.download = link.textContent.replace(/^📎\s*/, ''); a.click(); } },
+      { label: 'Remove from page', icon: Trash2, danger: true, run: () => editor.chain().focus().setTextSelection(at).extendMarkRange('link').deleteSelection().run() },
+    ] });
+  } else if (link && !link.dataset.pageMention) {
     groups.push({ title: 'Link', items: [
       { label: 'Open link', icon: ExternalLink, run: () => window.open(link.href, '_blank', 'noopener') },
       { label: 'Remove link', icon: Unlink, run: () => editor.chain().setTextSelection(at).extendMarkRange('link').unsetLink().run() },
