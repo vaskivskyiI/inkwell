@@ -2,7 +2,7 @@
 import { one, many, q, tx, now } from './db/index.js';
 import { config } from './config.js';
 import { hashPassword, verifyPassword, randomToken, sha256 } from './util/crypto.js';
-import { fail, str } from './util/http.js';
+import { fail, str, isUuid } from './util/http.js';
 import { getServerSetting } from './settings.js';
 
 export const COOKIE = 'inkwell_session';
@@ -138,10 +138,34 @@ export default async function authRoutes(app) {
     return (await many(`SELECT u.*, (SELECT count(*) FROM space_members m WHERE m.user_id = u.id)::int AS spaces FROM users u ORDER BY created_at`))
       .map((u) => ({ ...publicUser(u), disabled: u.disabled, createdAt: u.created_at, spaces: u.spaces }));
   });
+  app.post('/api/admin/users', async (req) => {
+    admin(req);
+    const u = await createUser(req.body || {});
+    if (req.body?.isAdmin) await q('UPDATE users SET is_admin = true WHERE id = $1', u.id);
+    return { id: u.id };
+  });
   app.patch('/api/admin/users/:id', async (req) => {
     admin(req);
-    const { disabled, isAdmin } = req.body || {};
-    if (req.params.id === req.user.id && (disabled || isAdmin === false)) fail(400, 'You cannot lock yourself out');
+    const { disabled, isAdmin, name, email, password } = req.body || {};
+    const u = await one('SELECT id FROM users WHERE id = $1', isUuid(req.params.id) ? req.params.id : null);
+    if (!u) fail(404, 'User not found');
+    if (u.id === req.user.id && (disabled || isAdmin === false)) fail(400, 'You cannot lock yourself out');
+    if (name !== undefined) {
+      if (!str(name, 100)) fail(400, 'A name is required');
+      await q('UPDATE users SET name = $2 WHERE id = $1', u.id, str(name, 100));
+    }
+    if (email !== undefined) {
+      const e = str(email, 200).toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+$/.test(e)) fail(400, 'A valid e-mail address is required');
+      if (await one('SELECT 1 FROM users WHERE email = $1 AND id <> $2', e, u.id)) fail(409, 'An account with this e-mail already exists');
+      await q('UPDATE users SET email = $2 WHERE id = $1', u.id, e);
+    }
+    if (password) {
+      if (String(password).length < 8) fail(400, 'The password needs at least 8 characters');
+      await q('UPDATE users SET password_hash = $2 WHERE id = $1', u.id, hashPassword(password));
+      // A reset may answer a lost device or password, so everything signed in with the old one ends, tokens included.
+      await q('DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2', u.id, req.user.token_hash);
+    }
     if (disabled !== undefined) {
       await q('UPDATE users SET disabled = $2 WHERE id = $1', req.params.id, !!disabled);
       if (disabled) await q('DELETE FROM sessions WHERE user_id = $1', req.params.id);

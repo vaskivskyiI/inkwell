@@ -202,3 +202,25 @@ test('admin: list users, disable a user, sign-up switch', async () => {
   await ann.patch(`/api/admin/users/${eve.user.id}`, { disabled: true });
   assert.equal(await eve.status('GET', '/api/me'), 401);
 });
+
+test('admin: add and edit users', async () => {
+  assert.equal(await bob.status('POST', '/api/admin/users', { email: 'x@test.local', password: 'secret123' }), 403);
+  const { id } = await ann.post('/api/admin/users', { email: 'Zoe@test.local', name: 'Zoe', password: 'secret123', isAdmin: true });
+  let u = (await ann.get('/api/admin/users')).find((x) => x.id === id);
+  assert.deepEqual([u.email, u.name, u.isAdmin, u.spaces], ['zoe@test.local', 'Zoe', true, 2]);
+  assert.equal(await ann.status('POST', '/api/admin/users', { email: 'zoe@test.local', password: 'secret123' }), 409);
+
+  const zoe = client(app);
+  await zoe.post('/api/auth/login', { email: 'zoe@test.local', password: 'secret123' });
+  await ann.patch(`/api/admin/users/${id}`, { name: 'Zoe B', email: 'zoe.b@test.local', password: 'another123' });
+  u = (await ann.get('/api/admin/users')).find((x) => x.id === id);
+  assert.deepEqual([u.email, u.name], ['zoe.b@test.local', 'Zoe B']);
+  assert.equal(await zoe.status('GET', '/api/me'), 401, 'a new password ends old sessions');
+  await zoe.post('/api/auth/login', { email: 'zoe.b@test.local', password: 'another123' });
+
+  assert.equal(await ann.status('PATCH', `/api/admin/users/${id}`, { email: bob.user.email }), 409);
+  assert.equal(await ann.status('PATCH', `/api/admin/users/${id}`, { password: 'short' }), 400);
+  assert.equal(await ann.status('PATCH', '/api/admin/users/nope', { name: 'x' }), 404);
+  await ann.patch(`/api/admin/users/${ann.user.id}`, { password: 'secret123' });
+  await ann.get('/api/me'); // the admin's own session survives their own reset
+});

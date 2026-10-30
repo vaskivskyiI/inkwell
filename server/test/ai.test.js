@@ -154,3 +154,27 @@ test('Halcyon: connect, search, meeting note from an event, action items become 
     assert.ok((await ann.get(`/api/notes/${note.id}/links`)).some((l) => l.kind === 'task' && l.title === 'Send slides'));
   } finally { fake.close(); }
 });
+
+test('providers can be edited; models are listed with their tasks and suggestions', async () => {
+  const { describeModels } = await import('../src/ai/models.js');
+  const [gpt, emb, tts] = describeModels('openai', [{ id: 'gpt-4.1-mini-2025' }, { id: 'text-embedding-3-small', embedding: true }, { id: 'gpt-4o-mini-tts' }]);
+  assert.deepEqual([gpt.tasks, gpt.suggested], [['chat', 'vision'], ['chat', 'vision']]);
+  assert.deepEqual([emb.tasks, emb.suggested], [['embed'], ['embed']]);
+  assert.deepEqual(tts.tasks, []);
+  assert.deepEqual(describeModels('ollama', [{ id: 'qwen2.5vl:7b' }])[0].tasks, ['chat', 'vision']);
+
+  const { id } = await ann.post('/api/ai/providers', { type: 'openai', name: 'Editable', apiKey: 'sk-keep' });
+  await ann.patch(`/api/ai/providers/${id}`, { name: 'Renamed', type: 'mock', baseUrl: '', apiKey: '' });
+  const p = (await ann.get('/api/ai/providers')).find((x) => x.id === id);
+  assert.deepEqual([p.name, p.type, p.hasKey], ['Renamed', 'mock', true]);
+  assert.deepEqual((await ann.post('/api/ai/models', { id }))[0].id, 'mock');
+  assert.ok((await ann.get('/api/ai/types')).find((t) => t.id === 'anthropic').advice.vision.models.length);
+
+  // A shared key must not be pointed at an address of a plain user's choosing.
+  const shared = await ann.post('/api/ai/providers', { type: 'mock', name: 'Shared', shared: true });
+  const bob = await signup(app, 'bob-models@test.local');
+  assert.equal((await bob.post('/api/ai/models', { id: shared.id }))[0].id, 'mock');
+  assert.equal(await bob.status('POST', '/api/ai/models', { id: shared.id, baseUrl: 'http://attacker.test' }), 403);
+  await ann.del(`/api/ai/providers/${id}`);
+  await ann.del(`/api/ai/providers/${shared.id}`);
+});

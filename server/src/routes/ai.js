@@ -5,6 +5,7 @@ import { needNote } from '../spaces.js';
 import { getSettings, saveSettings, getServerSetting, setServerSetting } from '../settings.js';
 import { PROVIDER_TYPES, makeProvider } from '../ai/providers/index.js';
 import { availableProviders, resolve, forgetProvider } from '../ai/router.js';
+import { MODEL_ADVICE, describeModels } from '../ai/models.js';
 import { INLINE_ACTIONS, inlineSystem, reviewSystem } from '../ai/prompts.js';
 import { enqueue } from '../ai/queue.js';
 import { resumeWaiting, reanalyseAll } from '../ai/tasks.js';
@@ -17,7 +18,7 @@ import { config } from '../config.js';
 const providerOut = (p) => ({ id: p.id, name: p.name, type: p.type, baseUrl: p.baseUrl, hasKey: !!(p.apiKeyEnc || p.apiKey), shared: p.shared, env: !!p.env });
 
 export default async function aiRoutes(app) {
-  app.get('/api/ai/types', async () => Object.entries(PROVIDER_TYPES).filter(([k]) => k !== 'mock' || config.demo).map(([id, t]) => ({ id, ...t })));
+  app.get('/api/ai/types', async () => Object.entries(PROVIDER_TYPES).filter(([k]) => k !== 'mock' || config.demo).map(([id, t]) => ({ id, ...t, advice: MODEL_ADVICE[id] })));
 
   app.get('/api/ai/providers', async (req) => (await availableProviders(req.user.id)).map(providerOut));
 
@@ -41,8 +42,9 @@ export default async function aiRoutes(app) {
   app.patch('/api/ai/providers/:id', async (req) => {
     const p = await ownProvider(req);
     const b = req.body || {};
-    await q('UPDATE ai_providers SET name = coalesce($2, name), base_url = coalesce($3, base_url), api_key_enc = coalesce($4, api_key_enc) WHERE id = $1',
-      p.id, b.name !== undefined ? str(b.name, 60) : null, b.baseUrl !== undefined ? str(b.baseUrl, 300) : null, b.apiKey ? encrypt(str(b.apiKey, 500)) : null);
+    if (b.type !== undefined && (!PROVIDER_TYPES[b.type] || (b.type === 'mock' && !config.demo))) fail(400, 'Unknown provider type');
+    await q('UPDATE ai_providers SET name = coalesce($2, name), base_url = coalesce($3, base_url), api_key_enc = coalesce($4, api_key_enc), type = coalesce($5, type) WHERE id = $1',
+      p.id, b.name !== undefined ? str(b.name, 60) || p.name : null, b.baseUrl !== undefined ? str(b.baseUrl, 300) : null, b.apiKey ? encrypt(str(b.apiKey, 500)) : null, b.type ?? null);
     forgetProvider();
     await resumeWaiting(req.user.id);
     return { ok: true };
@@ -61,15 +63,22 @@ export default async function aiRoutes(app) {
     if (b.id) {
       const p = (await availableProviders(req.user.id)).find((x) => x.id === b.id) || fail(404, 'Provider not found');
       const { decrypt } = await import('../util/crypto.js');
-      return { inst: makeProvider({ type: p.type, baseUrl: p.baseUrl || PROVIDER_TYPES[p.type].defaultBaseUrl, apiKey: p.apiKey ?? decrypt(p.apiKeyEnc) }), type: p.type };
+      // Trying changes before saving them: pointing a saved key at another address would hand it over, so this is for
+      // whoever may edit the provider anyway.
+      const changed = b.type !== undefined || b.baseUrl !== undefined || !!b.apiKey;
+      if (changed && (p.env || (p.shared && !req.user.is_admin))) fail(403, 'Only administrators change server-wide providers');
+      if (b.type !== undefined && !PROVIDER_TYPES[b.type]) fail(400, 'Unknown provider type');
+      const type = b.type ?? p.type;
+      const baseUrl = (b.baseUrl !== undefined ? str(b.baseUrl, 300) : p.baseUrl) || PROVIDER_TYPES[type].defaultBaseUrl;
+      return { inst: makeProvider({ type, baseUrl, apiKey: str(b.apiKey, 500) || (p.apiKey ?? decrypt(p.apiKeyEnc)) }), type };
     }
     if (!PROVIDER_TYPES[b.type]) fail(400, 'Unknown provider type');
     return { inst: makeProvider({ type: b.type, baseUrl: str(b.baseUrl, 300) || PROVIDER_TYPES[b.type].defaultBaseUrl, apiKey: str(b.apiKey, 500) }), type: b.type };
   };
 
   app.post('/api/ai/models', async (req) => {
-    const { inst } = await providerFrom(req);
-    try { return await inst.listModels(); } catch (e) { fail(502, e.message); }
+    const { inst, type } = await providerFrom(req);
+    try { return describeModels(type, await inst.listModels()); } catch (e) { fail(502, e.message); }
   });
 
   app.post('/api/ai/test', async (req) => {

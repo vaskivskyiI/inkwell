@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Layers, Sparkles, PenLine, Plug, KeyRound, Shield, Trash2, Plus, Check, RefreshCw, Upload } from 'lucide-react';
+import { User, Layers, Sparkles, PenLine, Plug, KeyRound, Shield, Trash2, Plus, Check, RefreshCw, Upload, Pencil } from 'lucide-react';
 import { get, post, put, patch, del, api } from './api.js';
 import { store, useStore, navigate, openNote, toast, toastError, localGet } from './store.js';
 import { loadSpaces, switchSpace, loadTree } from './data.js';
@@ -141,6 +141,49 @@ function Spaces() {
   );
 }
 
+const TASKS = [['chat', 'Writing, summaries, questions'], ['vision', 'Handwriting & images'], ['embed', 'Search by meaning'], ['audio', 'Speech to text (recordings)']];
+const TASK_NAMES = { chat: 'text', vision: 'images', embed: 'search', audio: 'speech' };
+
+function ModelList({ models }) {
+  if (!models) return <p className="hint model-list"><span className="spinner" /> Asking the provider…</p>;
+  if (models.error) return <p className="hint error model-list">Could not list models: {models.error}</p>;
+  if (!models.length) return <p className="hint model-list">The provider lists no models.</p>;
+  return (
+    <ul className="model-list">
+      {models.map((m) => <li key={m.id}><code>{m.id}</code> <span className="muted small">{m.tasks.map((t) => `${m.suggested.includes(t) ? '★ ' : ''}${TASK_NAMES[t]}`).join(' · ')}</span></li>)}
+    </ul>
+  );
+}
+
+// A list of what the provider really has, best fits first. A name can still be typed: not every server lists everything.
+function ModelPicker({ task, value, list, onPick }) {
+  const [typing, setTyping] = useState(false);
+  const models = Array.isArray(list) ? list : [];
+  const known = models.some((m) => m.id === value);
+  if (typing || list?.error || (list && !models.length)) {
+    return (
+      <>
+        <input key={value} defaultValue={value} placeholder="model name" autoFocus={typing} onBlur={(e) => { setTyping(false); if (e.target.value !== value) onPick(e.target.value.trim()); }} onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }} />
+        {list?.error && <span className="hint error route-note">Could not list models: {list.error}</span>}
+      </>
+    );
+  }
+  const best = models.filter((m) => m.suggested.includes(task));
+  const fits = models.filter((m) => !m.suggested.includes(task) && m.tasks.includes(task));
+  const rest = models.filter((m) => !m.suggested.includes(task) && !m.tasks.includes(task));
+  const opts = (l, star) => l.map((m) => <option key={m.id} value={m.id}>{star}{m.id}</option>);
+  return (
+    <select value={value} disabled={!list} onChange={(e) => { if (e.target.value === '__type') setTyping(true); else onPick(e.target.value); }}>
+      <option value="">{list ? 'Default model' : 'Loading models…'}</option>
+      {value && !known && <option value={value}>{value}</option>}
+      {best.length > 0 && <optgroup label="Suggested">{opts(best, '★ ')}</optgroup>}
+      {fits.length > 0 && <optgroup label="Fits this task">{opts(fits, '')}</optgroup>}
+      {rest.length > 0 && <optgroup label="Other models">{opts(rest, '')}</optgroup>}
+      <option value="__type">Type a name…</option>
+    </select>
+  );
+}
+
 function AiSettings() {
   const settings = useStore((s) => s.settings);
   const user = useStore((s) => s.user);
@@ -152,9 +195,19 @@ function AiSettings() {
   const [models, setModels] = useState({});
   const load = () => Promise.all([get('/api/ai/providers').then(setProviders), get('/api/ai/status').then(setStatus), get('/api/ai/failed').then(setFailed)]).catch(toastError);
   useEffect(() => { get('/api/ai/types').then(setTypes).catch(toastError); load(); }, []);
-  const loadModels = (id) => post('/api/ai/models', { id }).then((m) => setModels((x) => ({ ...x, [id]: m }))).catch(toastError);
+  const [shown, setShown] = useState(null);
+  const loadModels = (id, body = { id }) => post('/api/ai/models', body).then((m) => m, (e) => ({ error: e.message })).then((m) => { setModels((x) => ({ ...x, [id]: m })); return m; });
+  const chosen = ['chat', 'vision', 'embed', 'audio'].map((t) => settings?.ai[t]?.providerId).filter(Boolean).join();
+  useEffect(() => { for (const id of new Set(chosen.split(',').filter(Boolean))) if (!models[id]) loadModels(id); }, [chosen]); // eslint-disable-line react-hooks/exhaustive-deps
   const test = async (body) => { const r = await post('/api/ai/test', body); toast(r.ok ? `Works (${r.model}, ${r.ms} ms): “${r.reply}”` : `Failed: ${r.error}`, { kind: r.ok ? 'info' : 'error', duration: 7000 }); };
-  const addProvider = async () => { await post('/api/ai/providers', form); setForm(null); load(); toast('Provider added'); };
+  const saveProvider = async () => {
+    const { id, name, type, baseUrl, apiKey, shared } = form;
+    if (id) await patch(`/api/ai/providers/${id}`, { name, type, baseUrl, apiKey });
+    else await post('/api/ai/providers', { name, type, baseUrl, apiKey, shared });
+    setForm(null); setModels({}); await load(); toast(id ? 'Provider saved' : 'Provider added');
+  };
+  const editProvider = (p) => { setModels((m) => ({ ...m, form: undefined })); setForm({ id: p.id, type: p.type, name: p.name, baseUrl: p.baseUrl || '', apiKey: '', hasKey: p.hasKey }); };
+  const showModels = (id) => { setShown(shown === id ? null : id); if (shown !== id) loadModels(id); };
   const route = (task, providerId, model) => saveSettings({ ai: { [task]: providerId ? { providerId, model } : null } }).then(load);
   if (!settings) return null;
   const T = (id) => types.find((t) => t.id === id);
@@ -171,24 +224,30 @@ function AiSettings() {
           <b>{p.name}</b> <span className="muted small">{T(p.type)?.label || p.type}{p.baseUrl ? ` · ${p.baseUrl}` : ''}{p.shared ? ' · server-wide' : ''}</span>
           <span className="grow" />
           <button onClick={() => test({ id: p.id }).catch(toastError)}>Test</button>
+          <button onClick={() => showModels(p.id)}>Models</button>
+          {!p.env && (!p.shared || user.isAdmin) && <button onClick={() => editProvider(p)}><Pencil size={14} /> Edit</button>}
           {!p.env && (!p.shared || user.isAdmin) && <button className="icon small" onClick={() => del(`/api/ai/providers/${p.id}`).then(load).catch(toastError)} aria-label="Remove"><Trash2 size={14} /></button>}
+          {shown === p.id && <ModelList models={models[p.id]} />}
         </div>
       ))}
-      {!form ? <button onClick={() => setForm({ type: 'ollama', name: '', baseUrl: '', apiKey: '' })}><Plus size={14} /> Add provider</button> : (
+      {!form ? <button onClick={() => { setModels((m) => ({ ...m, form: undefined })); setForm({ type: 'ollama', name: '', baseUrl: '', apiKey: '' }); }}><Plus size={14} /> Add provider</button> : (
         <div className="card-form">
           <Field label="Type"><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>{types.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}</select></Field>
           <Field label="Name"><input value={form.name} placeholder={T(form.type)?.label} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="Address" hint={`Default: ${T(form.type)?.defaultBaseUrl || '—'}`}><input value={form.baseUrl} placeholder={T(form.type)?.defaultBaseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} /></Field>
-          {T(form.type)?.needsKey !== false && <Field label="API key"><input type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} /></Field>}
-          {user.isAdmin && <label className="check"><input type="checkbox" checked={!!form.shared} onChange={(e) => setForm({ ...form, shared: e.target.checked })} /> Server-wide (all users may use it)</label>}
-          <div className="row"><button onClick={() => test(form).catch(toastError)}>Test</button><button className="primary" onClick={() => addProvider().catch(toastError)}>Add</button><button onClick={() => setForm(null)}>Cancel</button></div>
+          {T(form.type)?.needsKey !== false && <Field label="API key" hint={form.hasKey ? 'A key is saved. Leave empty to keep it.' : undefined}><input type="password" autoComplete="new-password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} /></Field>}
+          {!form.id && user.isAdmin && <label className="check"><input type="checkbox" checked={!!form.shared} onChange={(e) => setForm({ ...form, shared: e.target.checked })} /> Server-wide (all users may use it)</label>}
+          <div className="row"><button onClick={() => test(form).catch(toastError)}>Test</button><button onClick={() => loadModels('form', form)}>List models</button><button className="primary" onClick={() => saveProvider().catch(toastError)}>{form.id ? 'Save' : 'Add'}</button><button onClick={() => setForm(null)}>Cancel</button></div>
+          {models.form && <ModelList models={models.form} />}
         </div>
       )}
 
       <h3>Which model does what</h3>
-      <p className="hint">Handwriting and images need a vision model (e.g. qwen2.5vl, llava, GPT-4.1, Claude, Gemini). Search by meaning needs an embedding model. Recordings need speech to text: OpenAI (whisper-1), Gemini, or an OpenAI-compatible server with a Whisper model; Ollama does not offer it.</p>
-      {[['chat', 'Writing, summaries, questions'], ['vision', 'Handwriting & images'], ['embed', 'Search by meaning'], ['audio', 'Speech to text (recordings)']].map(([task, label]) => {
+      <p className="hint">Pick a provider for a task, then one of its models. Models marked ★ are the ones we suggest for that task. Background work runs often, so a fast, cheap model is usually the better choice for writing and summaries.</p>
+      {TASKS.map(([task, label]) => {
         const r = settings.ai[task];
+        const chosenType = providers.find((p) => p.id === r?.providerId)?.type;
+        const note = T(chosenType)?.advice?.[task]?.note;
         return (
           <div key={task} className="route-row">
             <span className="label">{label}</span>
@@ -197,15 +256,21 @@ function AiSettings() {
               {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             {r?.providerId && (
-              <>
-                <input list={`models-${task}`} value={r.model || ''} placeholder="default model" onFocus={() => !models[r.providerId] && loadModels(r.providerId)}
-                  onChange={(e) => store.set({ settings: { ...settings, ai: { ...settings.ai, [task]: { ...r, model: e.target.value } } } })} onBlur={(e) => route(task, r.providerId, e.target.value)} />
-                <datalist id={`models-${task}`}>{(models[r.providerId] || []).map((m) => <option key={m.id} value={m.id} />)}</datalist>
-              </>
+              <ModelPicker task={task} value={r.model || ''} list={models[r.providerId]} onPick={(m) => route(task, r.providerId, m)} />
             )}
+            {note && <span className="hint route-note">{note}</span>}
           </div>
         );
       })}
+      <details className="advice">
+        <summary>Suggested models for each provider</summary>
+        {types.filter((t) => t.advice).map((t) => (
+          <div key={t.id}>
+            <h4>{t.label}</h4>
+            <ul className="hint">{TASKS.map(([task, label]) => <li key={task}><b>{label}:</b> {t.advice[task].models.join(', ')}{t.advice[task].models.length ? '. ' : ''}{t.advice[task].note}</li>)}</ul>
+          </div>
+        ))}
+      </details>
       <h3>Background work</h3>
       <p>{status ? `${status.jobs.queued} waiting · ${status.jobs.running} running · ${status.jobs.failed} failed` : '…'}</p>
       <div className="row">
@@ -370,8 +435,17 @@ function Tokens() {
 function Admin() {
   const [users, setUsers] = useState([]);
   const [cfg, setCfg] = useState(null);
+  const [form, setForm] = useState(null);
+  const me = useStore((s) => s.user);
   const load = () => Promise.all([get('/api/admin/users').then(setUsers), get('/api/admin/settings').then(setCfg)]).catch(toastError);
   useEffect(() => { load(); }, []);
+  const save = async () => {
+    const { id, name, email, password, isAdmin } = form;
+    if (id) await patch(`/api/admin/users/${id}`, { name, email, ...(password ? { password } : {}) });
+    else await post('/api/admin/users', { name, email, password, isAdmin });
+    setForm(null); await load(); toast(id ? 'User saved' : 'User added');
+    if (id === me.id) store.set({ user: await get('/api/me') });
+  };
   return (
     <>
       <h2>Administration</h2>
@@ -383,12 +457,23 @@ function Admin() {
             <td><span className="avatar" style={{ background: u.color }}>{u.name[0]}</span> {u.name} <span className="muted small">{u.email}</span></td>
             <td className="muted small">{u.spaces} spaces{u.isAdmin ? ' · admin' : ''}{u.disabled ? ' · disabled' : ''}</td>
             <td>
+              <button onClick={() => setForm({ id: u.id, name: u.name, email: u.email, password: '' })}><Pencil size={14} /> Edit</button>
               <button onClick={() => patch(`/api/admin/users/${u.id}`, { isAdmin: !u.isAdmin }).then(load).catch(toastError)}>{u.isAdmin ? 'Remove admin' : 'Make admin'}</button>
               <button className={u.disabled ? '' : 'danger'} onClick={() => patch(`/api/admin/users/${u.id}`, { disabled: !u.disabled }).then(load).catch(toastError)}>{u.disabled ? 'Enable' : 'Disable'}</button>
             </td>
           </tr>
         ))}
       </tbody></table>
+      {!form ? <button onClick={() => setForm({ name: '', email: '', password: '', isAdmin: false })}><Plus size={14} /> Add user</button> : (
+        <div className="card-form">
+          <h4>{form.id ? `Edit ${form.name}` : 'New user'}</h4>
+          <Field label="Name"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+          <Field label="E-mail" hint="This is what they sign in with."><input type="email" autoComplete="off" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
+          <Field label={form.id ? 'New password' : 'Password'} hint={form.id ? 'Leave empty to keep the password. A new one signs this user out everywhere, apps and tokens too.' : 'At least 8 characters. Give it to the user yourself; they can change it under Profile.'}><input type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
+          {!form.id && <label className="check"><input type="checkbox" checked={form.isAdmin} onChange={(e) => setForm({ ...form, isAdmin: e.target.checked })} /> Administrator</label>}
+          <div className="row"><button className="primary" disabled={!form.email || (form.password ? form.password.length < 8 : !form.id)} onClick={() => save().catch(toastError)}>{form.id ? 'Save' : 'Add user'}</button><button onClick={() => setForm(null)}>Cancel</button></div>
+        </div>
+      )}
       <p className="hint">Server-wide AI providers are added under Settings → AI (tick “Server-wide”). <button className="link" onClick={() => navigate('#/settings/ai')}>Open</button></p>
     </>
   );

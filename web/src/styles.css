@@ -498,3 +498,12 @@ table.members td:first-child { display: flex; align-items: center; gap: 8px; }
 .image-bar button.on { color: var(--accent); }
 .touch-only { display: none !important; }
 @media (any-pointer: coarse) { .touch-only { display: inline-flex !important; } }
+
+/* ---------- models and advice */
+.model-list { flex-basis: 100%; list-style: none; margin: 6px 0 0; padding: 0; max-height: 260px; overflow: auto; font-size: 13px; }
+.model-list li { padding: 2px 0; }
+.route-note { flex-basis: 100%; margin: -2px 0 6px; }
+.route-row select { max-width: 100%; min-width: 0; }
+.advice { margin: 10px 0; }
+.advice h4 { margin: 10px 0 2px; }
+.advice ul { margin: 0; padding-left: 18px; }
