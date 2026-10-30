@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Settings, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, LogOut, ChevronsUpDown, Check, Users, CalendarPlus } from 'lucide-react';
+import { ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Settings, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, LogOut, ChevronsUpDown, Check, Users, CalendarPlus, NotebookText, Mail, CalendarDays, CheckSquare } from 'lucide-react';
 import { post, patch, del } from './api.js';
 import { store, useStore, openNote, navigate, toast, toastError, localGet, localSet, currentSpace } from './store.js';
 import { switchSpace, loadSpaces, forgetDoc } from './data.js';
@@ -49,6 +49,15 @@ export function Sidebar() {
 
   return (
     <nav className="sidebar" onClick={(e) => { if (e.target.closest('a,.tree-row,.nav-item')) close(); }}>
+      {halcyon?.connected && (
+        // One click between the two apps: Halcyon opens in this tab and has a matching "Notes" entry back.
+        <div className="app-switch" role="navigation" aria-label="Apps">
+          <a className="on" href="#/" title="Notes (Inkwell)"><NotebookText size={14} /> Notes</a>
+          <a href={`${halcyon.baseUrl}/#/mail/unified`} title="Mail (Halcyon)"><Mail size={14} /> Mail</a>
+          <a href={`${halcyon.baseUrl}/#/calendar`} title="Calendar (Halcyon)"><CalendarDays size={14} /> Calendar</a>
+          <a href={`${halcyon.baseUrl}/#/tasks`} title="Tasks (Halcyon)"><CheckSquare size={14} /> Tasks</a>
+        </div>
+      )}
       <Menu className="space-switch" label="Switch space" align="left" trigger={<>
         <span className="space-icon" style={{ background: space?.color }}>{space?.icon || space?.name?.[0]}</span>
         <span className="grow">{space?.name || '…'}</span><ChevronsUpDown size={14} />

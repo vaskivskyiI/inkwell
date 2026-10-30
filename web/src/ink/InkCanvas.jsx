@@ -24,7 +24,12 @@ const scrollParent = (el) => {
   return document.scrollingElement;
 };
 
-export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, onHeightChange, autoGrow = false, minHeight = 200, readOnly = false, paper = 'plain', background, onTap, children, onStrokesChange, zoomable = true }, ref) {
+// offsetOf(stroke) → vertical shift in logical units (ink anchored to text that moved); anchorFor(stroke) → anchor
+// stored on new strokes; redrawKey: changes when offsets may have changed.
+export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, onHeightChange, autoGrow = false, minHeight = 200, readOnly = false, paper = 'plain', background, onTap, children, onStrokesChange, zoomable = true, offsetOf, anchorFor, redrawKey }, ref) {
+  const offOf = (s) => (s.a && offsetOf ? offsetOf(s) || 0 : 0);
+  // The stroke where it is shown (points shifted by its offset), for hit tests and selection.
+  const shown = (s) => { const o = offOf(s); return o ? { ...s, p: s.p.map((v, i) => (i % 3 === 1 ? v + o : v)) } : s; };
   const wrap = useRef(null), base = useRef(null), live = useRef(null);
   const [width, setWidth] = useState(0);
   const [zoom, setZoom] = useState(1);
@@ -162,18 +167,19 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     for (const s of strokes.current) {
       ctx.globalAlpha = (TOOLS[s.t] || TOOLS.pen).opacity;
       ctx.fillStyle = dark && /^#(000000|111827|1f2937)$/i.test(s.c) ? '#e5e7eb' : s.c || '#1f2937';
-      ctx.fill(pathOf(s));
+      const off = offOf(s);
+      if (off) { ctx.save(); ctx.translate(0, off); ctx.fill(pathOf(s)); ctx.restore(); } else ctx.fill(pathOf(s));
     }
     ctx.globalAlpha = 1;
     if (sel.current.ids.size) {
       const chosen = strokes.current.filter((s) => sel.current.ids.has(s.id));
       ctx.strokeStyle = '#6366f1'; ctx.lineWidth = 1.5 / scale;
-      for (const s of chosen) ctx.stroke(pathOf(s));
-      const b = bounds(chosen);
+      for (const s of chosen) { ctx.save(); ctx.translate(0, offOf(s)); ctx.stroke(pathOf(s)); ctx.restore(); }
+      const b = bounds(chosen.map(shown));
       if (b) { ctx.setLineDash([6 / scale, 4 / scale]); ctx.strokeRect(b.minX - 6, b.minY - 6, b.maxX - b.minX + 12, b.maxY - b.minY + 12); ctx.setLineDash([]); sel.current.box = b; }
     }
   }
-  useEffect(schedule, [width, h, zoom]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(schedule, [width, h, zoom, redrawKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const mo = new MutationObserver(schedule);
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
@@ -292,6 +298,8 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
       if (!gs.snapped && tool.shapes && s.t === 'pen') { const r = shapeOf(s, { minSize: 60 }); if (r) s.p = r.p; }
       s.p = s.p.map((v, i) => (i % 3 === 2 ? Math.round(v * 100) / 100 : Math.round(v * 10) / 10));
       const a = ensureArray();
+      const anchor = anchorFor?.(s);
+      if (anchor) s.a = anchor;
       doc.transact(() => a.push([s]), LOCAL);
       if (onHeightChange && !autoGrow) {
         const b = bounds([s]);
@@ -299,7 +307,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
       }
     } else if (gs.kind === 'tap') onTap?.(gs.p[0], gs.p[1]);
     else if (gs.kind === 'lasso' && gs.poly.length > 3) {
-      sel.current = { ids: new Set(strokes.current.filter((s) => strokeInLasso(s, gs.poly)).map((s) => s.id)), box: null };
+      sel.current = { ids: new Set(strokes.current.filter((s) => strokeInLasso(shown(s), gs.poly)).map((s) => s.id)), box: null };
       schedule(); force((x) => x + 1);
     } else if (gs.kind === 'move' && (gs.dx || gs.dy)) {
       const a = yarr.current;
@@ -326,9 +334,10 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     doc.transact(() => {
       for (let i = a.length - 1; i >= 0; i--) {
         const s = a.get(i);
-        if (!hits(s, p[0], p[1], r)) continue;
+        const off = offOf(s);
+        if (!hits(s, p[0], p[1] - off, r)) continue;
         if (!partial) { a.delete(i, 1); continue; }
-        const pieces = eraseFromStroke(s, p[0], p[1], r, sid);
+        const pieces = eraseFromStroke(s, p[0], p[1] - off, r, sid);
         if (!pieces) continue;
         a.delete(i, 1);
         if (pieces.length) a.insert(i, pieces);
@@ -356,7 +365,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     } else if (gs?.kind === 'move') {
       ctx.translate(gs.dx, gs.dy);
       ctx.globalAlpha = 0.6;
-      for (const s of strokes.current) if (sel.current.ids.has(s.id)) { ctx.fillStyle = s.c; ctx.fill(pathOf(s)); }
+      for (const s of strokes.current) if (sel.current.ids.has(s.id)) { ctx.fillStyle = s.c; ctx.save(); ctx.translate(0, offOf(s)); ctx.fill(pathOf(s)); ctx.restore(); }
     }
   }
 

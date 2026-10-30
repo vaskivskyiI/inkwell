@@ -1,4 +1,6 @@
-import { PenLine, Highlighter, Eraser, Lasso, Type, Undo2, Redo2, Trash2, ScanText, Shapes, ZoomIn, ZoomOut, Scissors } from 'lucide-react';
+import { useState } from 'react';
+import { toggleFullscreen } from '../ui/fullscreen.js';
+import { PenLine, Highlighter, Eraser, Lasso, Type, Undo2, Redo2, Trash2, ScanText, Shapes, ZoomIn, ZoomOut, Scissors, Maximize2, Minimize2 } from 'lucide-react';
 import { useStore, store, localSet } from '../store.js';
 
 export const COLORS = ['#1f2937', '#2563eb', '#dc2626', '#16a34a', '#9333ea', '#ea580c'];
@@ -59,4 +61,14 @@ export function toolKey(e) {
   if (!k) return false;
   setInkTool({ tool: k });
   return true;
+}
+
+/** Full-screen toggle for the canvas around the button (the closest `selector`). */
+export function FullscreenButton({ selector }) {
+  const [fs, setFs] = useState(false);
+  const Icon = fs ? Minimize2 : Maximize2;
+  return (
+    <button className={fs ? 'on' : ''} title={fs ? 'Exit full screen (Esc)' : 'Full screen'} aria-label={fs ? 'Exit full screen' : 'Full screen'}
+      onClick={(e) => toggleFullscreen(e.currentTarget.closest(selector), setFs)}><Icon size={17} /></button>
+  );
 }

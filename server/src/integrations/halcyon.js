@@ -138,6 +138,13 @@ export default async function halcyonRoutes(app) {
 
   app.get('/api/halcyon/search', async (req) => searchHalcyon(req.user.id, req.query.kind, req.query.q));
   app.get('/api/halcyon/events', async (req) => eventsOn(req.user.id, req.query.date));
+  // Today dashboard: open tasks (overdue and due soon first) and e-mails waiting for a reply or an action.
+  app.get('/api/halcyon/tasks', async (req) => {
+    const tasks = (await call(await need(req.user.id), 'list_tasks', { include_done: false }) || []).map(taskOut);
+    return tasks.sort((a, b) => (a.date ? Date.parse(a.date) : Infinity) - (b.date ? Date.parse(b.date) : Infinity)).slice(0, 30);
+  });
+  app.get('/api/halcyon/open-items', async (req) => (await call(await need(req.user.id), 'list_open_items', { kind: 'both', limit: 20 }) || [])
+    .map((m) => ({ ...mailOut(m), meta: { ...mailOut(m).meta, action: m.action || null, needsReply: !!m.needs_reply } })));
   app.get('/api/halcyon/message/:id', async (req) => call(await need(req.user.id), 'get_message', { id: Number(req.params.id) || 0 }));
 
   app.post('/api/halcyon/tasks', async (req) => {

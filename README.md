@@ -19,7 +19,9 @@ Self-hostable, AI-native notes — between OneNote, Microsoft Journal, AFFiNE an
   version history, trash, public read-only links, Markdown/HTML export.
 - **Import** from AFFiNE (Snapshot export: structure, links, sub-pages, images, pen strokes) and from Markdown,
   Notion or Obsidian zips — Settings → Import.
-- **Halcyon integration**: link pages to e-mails, calendar events, tasks and people; meeting notes from today's
+- **Halcyon integration**: one-click switch between Notes, Mail, Calendar and Tasks; Today on Home (meetings, open
+  tasks, e-mails waiting for you) with a note for each; deep link `#/new?kind=event|email|task&ref=…` creates or opens
+  the note for any item; link pages to e-mails, calendar events, tasks and people; meeting notes from today's
   events; action items → Halcyon tasks.
 
 Plan, architecture and roadmap: [docs/PLAN.md](docs/PLAN.md) · project state for the next developer: [docs/HANDOFF.md](docs/HANDOFF.md).

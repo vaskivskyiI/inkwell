@@ -10,6 +10,8 @@ import { TEMPLATES } from './templates.js';
 import { config } from './config.js';
 
 const KINDS = ['note', 'email', 'event', 'task', 'contact', 'url'];
+// "2026-11-03 09:00" in the server's time zone (the pod runs in the host's zone, see deploy/podman-pod.sh).
+const localStamp = (d) => new Date(d).toLocaleString('sv-SE', { hour12: false }).slice(0, 16);
 const linkOut = (l, conn) => ({ id: l.id, kind: l.kind, ref: l.ref, title: l.title, meta: l.meta_json, createdAt: l.created_at, openUrl: l.kind === 'url' ? l.ref : openUrl(conn, l) });
 
 export async function addLink(userId, noteId, { kind, ref, title, meta }) {
@@ -97,10 +99,54 @@ export default async function linkRoutes(app) {
     const existing = await one(`SELECT n.* FROM note_links l JOIN notes n ON n.id = l.note_id WHERE l.kind = 'event' AND l.ref = $1 AND n.space_id = $2 AND n.deleted_at IS NULL LIMIT 1`, String(ev.ref), b.spaceId);
     if (existing && !b.force) return { ...noteOut(existing), existing: true };
     const start = ev.meta?.start ? new Date(ev.meta.start) : new Date();
-    const md = TEMPLATES.meeting.md.replace('{{date}}', start.toISOString().slice(0, 16).replace('T', ' '))
+    const md = TEMPLATES.meeting.md.replace('{{date}}', localStamp(start))
       .replace('**Attendees:** ', `${ev.meta?.location ? `**Where:** ${ev.meta.location}  \n` : ''}**Attendees:** ${(ev.meta?.attendees || []).join(', ')}`);
     const n = await createNote(req.user.id, { spaceId: b.spaceId, parentId: isUuid(b.parentId) ? b.parentId : null, title: ev.title, icon: '🗓️', markdown: md });
     await addLink(req.user.id, n.id, { kind: 'event', ref: ev.ref, title: ev.title, meta: ev.meta });
+    return noteOut(n);
+  });
+
+  // A note for any Halcyon item (deep link `#/new?kind=…&ref=…` from Halcyon, or "Take notes" in Inkwell): the
+  // existing linked note when there is one in the user's spaces, otherwise a new one linked to the item.
+  app.post('/api/notes/from-item', async (req) => {
+    const b = req.body || {};
+    const kind = ['event', 'email', 'task'].includes(b.kind) ? b.kind : fail(400, 'kind must be event, email or task');
+    const ref = str(b.ref, 200) || fail(400, 'Missing ref');
+    const spaces = await userSpaceIds(req.user.id);
+    const existing = await one(`SELECT n.* FROM note_links l JOIN notes n ON n.id = l.note_id
+      WHERE l.kind = $1 AND l.ref = $2 AND n.space_id = ANY($3::uuid[]) AND n.deleted_at IS NULL ORDER BY n.updated_at DESC LIMIT 1`, kind, ref, spaces);
+    if (existing) return { ...noteOut(existing), existing: true };
+    let spaceId = isUuid(b.spaceId) && spaces.includes(b.spaceId) ? b.spaceId : null;
+    if (spaceId && !(await one("SELECT 1 FROM space_members WHERE space_id = $1 AND user_id = $2 AND role IN ('owner', 'editor')", spaceId, req.user.id))) spaceId = null;
+    spaceId ||= (await one("SELECT space_id FROM space_members WHERE user_id = $1 AND role IN ('owner', 'editor') ORDER BY position LIMIT 1", req.user.id))?.space_id || fail(403, 'No space you can write in');
+    const meta = { ...(b.meta && typeof b.meta === 'object' ? b.meta : {}) };
+    let title = str(b.title, 300);
+    // Fill in what the link did not carry when Halcyon is connected here.
+    const conn = await connection(req.user.id);
+    if (conn && kind === 'email' && (!title || !meta.from)) {
+      try {
+        const m = await call(conn, 'get_message', { id: Number(ref) });
+        title ||= m.subject || '';
+        Object.assign(meta, { from: meta.from || m.from, date: meta.date || m.date, summary: m.summary || '' });
+      } catch { /* note without details */ }
+    }
+    const day = (d) => (d ? localStamp(d) : localStamp(Date.now()).slice(0, 10));
+    const attendees = Array.isArray(meta.attendees) ? meta.attendees : String(meta.attendees || '').split(',').map((s) => s.trim()).filter(Boolean);
+    let md, icon;
+    if (kind === 'event') {
+      icon = '🗓️';
+      md = TEMPLATES.meeting.md.replace('{{date}}', day(meta.start))
+        .replace('**Attendees:** ', `${meta.location ? `**Where:** ${meta.location}  \n` : ''}**Attendees:** ${attendees.join(', ')}`);
+      meta.attendees = attendees;
+    } else if (kind === 'email') {
+      icon = '✉️';
+      md = `${meta.from ? `**From:** ${meta.from}  \n` : ''}**Date:** ${day(meta.date)}\n\n${meta.summary ? `> ${meta.summary}\n\n` : ''}## Notes\n\n\n## Follow-ups\n- [ ] `;
+    } else {
+      icon = '☑️';
+      md = `${meta.due ? `**Due:** ${day(meta.due).slice(0, 10)}\n\n` : ''}## Notes\n\n\n## Steps\n- [ ] `;
+    }
+    const n = await createNote(req.user.id, { spaceId, title: title || (kind === 'email' ? 'E-mail notes' : kind === 'task' ? 'Task notes' : 'Meeting notes'), icon, markdown: md });
+    await addLink(req.user.id, n.id, { kind, ref, title: title || '', meta });
     return noteOut(n);
   });
 

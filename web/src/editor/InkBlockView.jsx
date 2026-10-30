@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { NodeViewWrapper } from '@tiptap/react';
 import { GripVertical, Sparkles, Copy } from 'lucide-react';
 import { InkCanvas } from '../ink/InkCanvas.jsx';
-import { InkToolbar, toolKey } from '../ink/InkToolbar.jsx';
+import { InkToolbar, toolKey, FullscreenButton } from '../ink/InkToolbar.jsx';
 import { useStore, toast, toastError } from '../store.js';
 import { post } from '../api.js';
 
@@ -35,7 +35,7 @@ export function InkBlockView({ node, updateAttributes, editor, extension, delete
       onKeyDown={(e) => { if (toolKey(e)) e.preventDefault(); }}>
       {editable && <div className="ink-block-bar" contentEditable={false}>
         <span className="drag" data-drag-handle draggable="true" title="Drag to move"><GripVertical size={15} /></span>
-        <InkToolbar canvas={canvas} compact onTranscribe={transcribe} onDeleteBlock={deleteNode} />
+        <InkToolbar canvas={canvas} compact onTranscribe={transcribe} onDeleteBlock={deleteNode} extra={<FullscreenButton selector=".ink-block" />} />
       </div>}
       <InkCanvas ref={canvas} doc={doc} canvasId={node.attrs.id} height={node.attrs.height} minHeight={node.attrs.bg ? 40 : 120} readOnly={!editable}
         onHeightChange={node.attrs.bg ? undefined : (h) => updateAttributes({ height: h })} paper="plain" background={node.attrs.bg} />

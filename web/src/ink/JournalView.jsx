@@ -3,7 +3,7 @@ import { useRef, useState, useEffect } from 'react';
 import * as Y from 'yjs';
 import { GripHorizontal, Plus, X } from 'lucide-react';
 import { InkCanvas } from './InkCanvas.jsx';
-import { InkToolbar, toolKey, setInkTool } from './InkToolbar.jsx';
+import { InkToolbar, toolKey, setInkTool, FullscreenButton } from './InkToolbar.jsx';
 import { sid } from './geometry.js';
 import { useYObserve, applyText } from '../ui/ytext.js';
 import { post } from '../api.js';
@@ -46,7 +46,7 @@ export function JournalView({ note, doc, readOnly }) {
     <div className="journal" onKeyDown={(e) => { if (!readOnly && e.target.tagName !== 'TEXTAREA' && toolKey(e)) e.preventDefault(); }}>
       {!readOnly && (
         <div className="journal-tools">
-          <InkToolbar canvas={canvas} text onTranscribe={transcribe} />
+          <InkToolbar canvas={canvas} text onTranscribe={transcribe} extra={<FullscreenButton selector=".journal" />} />
           <select value={paper} onChange={(e) => meta.set('paper', e.target.value)} aria-label="Paper">
             {PAPERS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>

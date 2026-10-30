@@ -1,6 +1,6 @@
 // Home, search results, trash and the full-page assistant.
 import { useEffect, useState } from 'react';
-import { FilePlus2, PenLine, CalendarDays, RotateCcw, Trash2, Search as SearchIcon } from 'lucide-react';
+import { FilePlus2, PenLine, CalendarDays, RotateCcw, Trash2, Search as SearchIcon, CheckSquare, Mail, ExternalLink, NotebookText } from 'lucide-react';
 import { get, post, del } from './api.js';
 import { useStore, openNote, toast, toastError, currentSpace } from './store.js';
 import { newPage, openToday } from './Sidebar.jsx';
@@ -16,13 +16,7 @@ export function HomePage() {
   const halcyon = useStore((s) => s.halcyon);
   const route = useStore((s) => s.route);
   const [recent, setRecent] = useState(null);
-  const [events, setEvents] = useState(null);
   useEffect(() => { get('/api/recent?limit=12').then(setRecent).catch(toastError); }, [spaceId]);
-  useEffect(() => { if (halcyon?.connected) get('/api/halcyon/events').then(setEvents).catch(() => setEvents([])); }, [halcyon?.connected]);
-  const meeting = async (ev) => {
-    const s = currentSpace();
-    try { const n = await post('/api/notes/meeting', { spaceId: s.id, event: ev }); if (n.existing) toast('Opened the existing meeting note'); openNote(n.id); } catch (e) { toastError(e); }
-  };
   return (
     <div className="page-col home">
       <h1>{greeting()}, {user?.name?.split(' ')[0]}</h1>
@@ -32,22 +26,7 @@ export function HomePage() {
         <button onClick={openToday}><PenLine size={18} /> Today's journal</button>
         <button onClick={() => newPage({ template: 'meeting' })}><CalendarDays size={18} /> Meeting notes</button>
       </div>
-      {halcyon?.connected && (
-        <section className={route.query.meetings ? 'highlight' : ''}>
-          <h3><CalendarDays size={16} /> Today's meetings</h3>
-          {events === null ? <span className="spinner" /> : !events.length ? <p className="muted">Nothing in your Halcyon calendar today.</p> : (
-            <div className="events">
-              {events.map((ev) => (
-                <div key={ev.ref} className="event">
-                  <span className="time">{ev.meta.allDay ? 'All day' : new Date(ev.meta.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  <span className="grow"><b>{ev.title}</b>{ev.meta.location && <span className="muted"> · {ev.meta.location}</span>}</span>
-                  <button onClick={() => meeting(ev)}>Take notes</button>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
+      {halcyon?.connected && <Today highlight={!!route.query.meetings} />}
       <section>
         <h3>Recently edited</h3>
         {recent === null ? <span className="spinner" /> : !recent.length ? <p className="muted">Nothing yet — start with a page or a journal.</p> : (
@@ -63,6 +42,89 @@ export function HomePage() {
         )}
       </section>
     </div>
+  );
+}
+
+// Opens (or creates) the note for a Halcyon item. Item → note via a link like
+// #/new?kind=event&ref=42&title=…&start=…&location=…&attendees=… (Halcyon's "New note in Inkwell", or Today below).
+export async function noteForItem(kind, ref, title, meta = {}) {
+  const n = await post('/api/notes/from-item', { kind, ref: String(ref), title, meta, spaceId: currentSpace()?.id });
+  if (n.existing) toast('Opened the existing note');
+  return n;
+}
+
+export function NewFromItem({ query }) {
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    const { kind, ref, title, space, ...rest } = query;
+    const meta = Object.fromEntries(Object.entries(rest).filter(([, v]) => v));
+    post('/api/notes/from-item', { kind, ref, title, meta, spaceId: space || currentSpace()?.id })
+      .then((n) => location.replace(`#/n/${n.id}`)) // replace: Back returns to where the user came from, not here
+      .catch(setError);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (error) return <div className="empty-state"><h2>Could not create the note</h2><p>{error.message}</p><a href="#/">Go home</a></div>;
+  return <div className="note-loading"><span className="spinner" /> Opening the note…</div>;
+}
+
+const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const dueOf = (iso) => {
+  if (!iso) return { label: '', late: false };
+  const d = new Date(iso), today = new Date(new Date().toDateString());
+  const days = Math.round((new Date(d.toDateString()) - today) / 864e5);
+  return { label: days < 0 ? `${-days} d late` : days === 0 ? 'today' : days === 1 ? 'tomorrow' : d.toLocaleDateString([], { day: 'numeric', month: 'short' }), late: days < 0 };
+};
+
+/** Today with Halcyon: meetings, open tasks and e-mails waiting for the user — each one a click from its note. */
+function Today({ highlight }) {
+  const halcyon = useStore((s) => s.halcyon);
+  const [data, setData] = useState({ events: null, tasks: null, mail: null });
+  const [notes, setNotes] = useState({}); // "kind:ref" → note id
+  useEffect(() => {
+    const load = async (key, url, kind) => {
+      const items = await get(url).catch(() => []);
+      setData((d) => ({ ...d, [key]: items }));
+      if (items.length) {
+        const found = await get(`/api/links/lookup?kind=${kind}&ref=${items.map((i) => encodeURIComponent(i.ref)).join(',')}`).catch(() => []);
+        setNotes((n) => ({ ...n, ...Object.fromEntries(found.map((f) => [`${kind}:${f.ref}`, f.id])) }));
+      }
+    };
+    load('events', '/api/halcyon/events', 'event');
+    load('tasks', '/api/halcyon/tasks', 'task');
+    load('mail', '/api/halcyon/open-items', 'email');
+  }, []);
+  const open = async (it) => {
+    const id = notes[`${it.kind}:${it.ref}`];
+    if (id) { openNote(id); return; }
+    try { openNote((await noteForItem(it.kind, it.ref, it.title, it.meta)).id); } catch (e) { toastError(e); }
+  };
+  const ext = (it) => `${halcyon.baseUrl}/#/${it.kind === 'email' ? `mail/unified/${it.ref}` : it.kind === 'event' ? 'calendar' : 'tasks'}`;
+  const row = (it, when, late, sub) => (
+    <div key={`${it.kind}:${it.ref}`} className="today-item">
+      <span className={`when${late ? ' late' : ''}`}>{when}</span>
+      <span className="grow"><b>{it.title}</b>{sub && <span className="sub">{sub}</span>}</span>
+      <a className="ext" href={ext(it)} title="Open in Halcyon"><ExternalLink size={14} /></a>
+      <button onClick={() => open(it)}>{notes[`${it.kind}:${it.ref}`] ? <><NotebookText size={14} /> Open note</> : <><FilePlus2 size={14} /> Note</>}</button>
+    </div>
+  );
+  const list = (items, empty, render) => (items === null ? <span className="spinner" /> : !items.length ? <p className="muted">{empty}</p> : <div className="today-list">{items.map(render)}</div>);
+  return (
+    <>
+      <section className={highlight ? 'highlight' : ''}>
+        <h3><CalendarDays size={16} /> Today's meetings</h3>
+        {list(data.events, 'Nothing in your calendar today.', (ev) => row(ev, ev.meta.allDay ? 'All day' : timeOf(ev.meta.start), false, [ev.meta.location, (ev.meta.attendees || []).slice(0, 4).join(', ')].filter(Boolean).join(' · ')))}
+      </section>
+      <div className="today-grid">
+        <section>
+          <h3><CheckSquare size={16} /> Tasks</h3>
+          {list(data.tasks, 'No open tasks.', (t) => { const d = dueOf(t.meta.due); return row(t, d.label, d.late, ''); })}
+        </section>
+        <section>
+          <h3><Mail size={16} /> Waiting for you</h3>
+          {list(data.mail, 'No e-mails waiting for a reply or an action.', (m) => row(m, m.date ? new Date(m.date).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '', false,
+            [m.meta.from?.replace(/<.*>/, '').trim(), m.meta.action || (m.meta.needsReply ? 'needs a reply' : '')].filter(Boolean).join(' · ')))}
+        </section>
+      </div>
+    </>
   );
 }
 

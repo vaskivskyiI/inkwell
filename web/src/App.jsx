@@ -6,7 +6,7 @@ import { loadSpaces, loadTree, loadFavorites, connectEvents, switchSpace } from 
 import { setUnauthorizedHandler } from './api.js';
 import { Sidebar, newPage, openToday } from './Sidebar.jsx';
 import { NoteView } from './NoteView.jsx';
-import { HomePage, SearchPage, TrashPage, AskPage } from './Pages.jsx';
+import { HomePage, SearchPage, TrashPage, AskPage, NewFromItem } from './Pages.jsx';
 import { SettingsPage } from './Settings.jsx';
 import { Palette } from './Palette.jsx';
 import { AuthPage } from './Auth.jsx';
@@ -71,6 +71,7 @@ export function App() {
   else if (route.name === 'trash') main = <div className="scroll"><TrashPage /></div>;
   else if (route.name === 'search') main = <div className="scroll"><SearchPage q={route.query.q} /></div>;
   else if (route.name === 'ask') main = <div className="scroll"><AskPage /></div>;
+  else if (route.name === 'new') main = <NewFromItem query={route.query} />;
   else main = <div className="scroll"><HomePage /></div>;
 
   return (

@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
-import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen } from 'lucide-react';
+import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2 } from 'lucide-react';
+import { toggleFullscreen } from './ui/fullscreen.js';
 import { get, post, put, patch, del } from './api.js';
 import { store, useStore, findNote, openNote, navigate, toast, toastError, localSet } from './store.js';
 import { openDoc, onEvent, loadFavorites, forgetDoc } from './data.js';
@@ -149,6 +150,7 @@ function NoteHeader({ detail, setDetail, handle, readOnly }) {
         {!online && <span className="offline" title="Offline — changes are kept on this device and sync when you're back"><WifiOff size={15} /> Offline</span>}
         {readOnly && !detail.deletedAt && <span className="readonly" title="You can view this page"><Eye size={15} /> View only</span>}
         <Presence provider={handle.provider} />
+        <button className="icon" onClick={(e) => toggleFullscreen(e.currentTarget.closest('.note-view'))} title="Full screen" aria-label="Full screen"><Maximize2 size={18} /></button>
         {detail.kind === 'page' && !readOnly && <button className={`icon${penLayer ? ' on' : ''}`} onClick={() => store.set({ penLayer: !penLayer })} title="Write by hand on top of this page" aria-label="Pen on page"><PenLine size={18} /></button>}
         <button className={`icon${detail.favorite ? ' fav' : ''}`} onClick={toggleFav} title="Favourite" aria-label="Favourite"><Star size={18} /></button>
         <button className={`icon${panel === 'ai' ? ' on' : ''}`} onClick={() => setPanel('ai')} title="AI insights" aria-label="AI insights"><Sparkles size={18} /></button>

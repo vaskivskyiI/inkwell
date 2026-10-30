@@ -41,3 +41,18 @@ test('partial eraser cuts a stroke in two and leaves untouched strokes alone', (
   assert.equal(pieces[0].c, '#000');
   assert.equal(eraseFromStroke(s, 100, 50, 6, () => 'x'), null);
 });
+
+test('ink anchored to a block follows it when text above changes, and stays put when the block is gone', async () => {
+  const { pickAnchor, anchorShift } = await import('../../web/src/ink/anchor.js');
+  const before = [{ top: 0, sig: 'From: Bob' }, { top: 40, sig: '' }, { top: 80, sig: 'Notes' }, { top: 140, sig: 'Follow-ups' }];
+  const a = pickAnchor(before, 150);
+  assert.deepEqual(a, { sig: 'Follow-ups', i: 3, y0: 140 });
+  assert.equal(pickAnchor(before, 45).sig, 'From: Bob', 'an empty block anchors to the nearest block with text above');
+  // Three lines inserted at the top: everything moved down by 90.
+  const after = [{ top: 0, sig: '' }, { top: 30, sig: '' }, { top: 60, sig: '' }, { top: 90, sig: 'From: Bob' }, { top: 130, sig: '' }, { top: 170, sig: 'Notes' }, { top: 230, sig: 'Follow-ups' }];
+  assert.equal(anchorShift(after, a), 90);
+  assert.equal(anchorShift(after.filter((b) => b.sig !== 'Follow-ups'), a), 0, 'block deleted: ink stays where it was drawn');
+  // Two blocks with the same text: the one nearest the original position wins.
+  const dup = [{ top: 0, sig: 'Follow-ups' }, ...after];
+  assert.equal(anchorShift(dup, a), 90);
+});

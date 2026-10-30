@@ -68,3 +68,21 @@ test('journals and pages nest in both directions', async () => {
   assert.equal(tree.find((x) => x.id === journal.id).kind, 'journal');
   assert.equal(tree.find((x) => x.id === sub.id).parentId, journal.id);
 });
+
+test('a note for a Halcyon item: created once, linked, with the item details', async () => {
+  const ev = await ann.post('/api/notes/from-item', { kind: 'event', ref: '77', title: 'Board meeting', spaceId: work(),
+    meta: { start: '2026-11-03T09:00:00Z', location: 'Room 2', attendees: 'Ann, Bob' } });
+  assert.equal(ev.title, 'Board meeting');
+  const md = await ann.get(`/api/notes/${ev.id}/export`);
+  assert.match(md, /\*\*Where:\*\* Room 2/);
+  assert.match(md, /\*\*Attendees:\*\* Ann, Bob/);
+  const again = await ann.post('/api/notes/from-item', { kind: 'event', ref: '77', title: 'Board meeting' });
+  assert.equal(again.id, ev.id);
+  assert.equal(again.existing, true);
+  assert.equal((await ann.get('/api/links/lookup?kind=event&ref=77'))[0].id, ev.id);
+  const mail = await ann.post('/api/notes/from-item', { kind: 'email', ref: '501', title: 'Budget draft', meta: { from: 'Bob <bob@x.y>' } });
+  assert.match(await ann.get(`/api/notes/${mail.id}/export`), /\*\*From:\*\* Bob <bob@x\.y>[\s\S]*## Follow-ups/);
+  const task = await ann.post('/api/notes/from-item', { kind: 'task', ref: '9', title: 'Send slides', meta: { due: '2026-11-04' } });
+  assert.match(await ann.get(`/api/notes/${task.id}/export`), /\*\*Due:\*\* 2026-11-04/);
+  assert.equal(await ann.status('POST', '/api/notes/from-item', { kind: 'calendar', ref: '1' }), 400);
+});

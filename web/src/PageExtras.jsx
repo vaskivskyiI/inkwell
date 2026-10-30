@@ -2,13 +2,14 @@
 // footer (links, backlinks, related pages, unlinked mentions).
 import { useEffect, useRef, useState, useMemo } from 'react';
 import * as Y from 'yjs';
-import { Plus, X, Sparkles, ArrowUpRight, ArrowDownLeft, Link2, Network, Quote } from 'lucide-react';
+import { Plus, X, Sparkles, ArrowUpRight, ArrowDownLeft, Link2, Network, Quote, Pin } from 'lucide-react';
 import { get, post } from './api.js';
 import { store, useStore, navigate, toast, toastError } from './store.js';
 import { onEvent } from './data.js';
 import { useYObserve } from './ui/ytext.js';
 import { InkCanvas } from './ink/InkCanvas.jsx';
-import { InkToolbar } from './ink/InkToolbar.jsx';
+import { InkToolbar, setInkTool } from './ink/InkToolbar.jsx';
+import { pickAnchor, anchorShift } from './ink/anchor.js';
 
 // ---------------------------------------------------------------- tags
 
@@ -63,27 +64,72 @@ export function TagBar({ detail, doc, readOnly }) {
 
 // ---------------------------------------------------------------- handwriting over a typed page
 
+// Ink written over text can stick to it: each stroke remembers the block (paragraph, heading, list…) it was
+// written on — by the start of that block's text and its position in the page — plus the block's top at the time.
+// When text above is added or removed the block moves, and the stroke is drawn shifted by the same amount, on every
+// device. (Text, not CRDT element identity: the editor sync may replace block elements when it splits them.)
+const sigOf = (el) => el.textContent.replace(/\s+/g, ' ').trim().slice(0, 80);
+
 export function PenLayer({ doc, on, readOnly, children }) {
   const host = useRef(null);
   const canvas = useRef(null);
+  const tool = useStore((s) => s.inkTool);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  const [layoutKey, setLayoutKey] = useState(0);
+  const tops = useRef(null); // block tops (logical units) for the current layout
   useEffect(() => {
-    const ro = new ResizeObserver(([e]) => setSize({ w: e.contentRect.width, h: e.contentRect.height }));
+    const ro = new ResizeObserver(([e]) => { setSize({ w: e.contentRect.width, h: e.contentRect.height }); tops.current = null; setLayoutKey((k) => k + 1); });
     ro.observe(host.current);
-    return () => ro.disconnect();
-  }, []);
+    // Content edits move blocks: re-measure after the editor has re-rendered.
+    let raf = 0;
+    const onUpdate = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { tops.current = null; setLayoutKey((k) => k + 1); }); };
+    doc.on('update', onUpdate);
+    return () => { ro.disconnect(); doc.off('update', onUpdate); cancelAnimationFrame(raf); };
+  }, [doc]);
   const logicalH = size.w ? Math.ceil((size.h * 1000) / size.w) + 40 : 400;
+
+  // Top-level blocks of the editor with their top (logical units) and text signature, for the current layout.
+  const blocks = () => {
+    if (tops.current) return tops.current;
+    const pm = host.current?.querySelector('.ProseMirror');
+    const base = host.current?.getBoundingClientRect();
+    if (!pm || !base?.width) return [];
+    const k = 1000 / base.width;
+    tops.current = [...pm.children].filter((el) => !el.classList.contains('ProseMirror-gapcursor'))
+      .map((el) => ({ top: (el.getBoundingClientRect().top - base.top) * k, sig: sigOf(el) }));
+    return tops.current;
+  };
+  const anchorFor = (stroke) => {
+    if (tool.anchor === false) return null;
+    let minY = Infinity;
+    for (let i = 1; i < stroke.p.length; i += 3) minY = Math.min(minY, stroke.p[i]);
+    return pickAnchor(blocks(), minY);
+  };
+  const cache = useRef({ key: -1, map: new Map() });
+  const offsetOf = (stroke) => {
+    const a = stroke.a;
+    if (!a?.sig) return 0;
+    if (cache.current.key !== layoutKey) cache.current = { key: layoutKey, map: new Map() };
+    const key = `${a.i}|${a.y0}|${a.sig}`;
+    if (!cache.current.map.has(key)) cache.current.map.set(key, anchorShift(blocks(), a));
+    return cache.current.map.get(key);
+  };
+
   return (
     <>
       {on && !readOnly && (
         <div className="pen-bar">
-          <InkToolbar canvas={canvas} zoom={false} extra={<button onClick={() => store.set({ penLayer: false })}>Done</button>} />
+          <InkToolbar canvas={canvas} zoom={false} extra={<>
+            <button className={tool.anchor !== false ? 'on' : ''} title="Stick new ink to the text under it, so it moves along when text is added or removed above" onClick={() => setInkTool({ anchor: tool.anchor === false })}><Pin size={15} /> Stick to text</button>
+            <button onClick={() => store.set({ penLayer: false })}>Done</button>
+          </>} />
         </div>
       )}
       <div className="page-body" style={{ position: 'relative' }}>
         <div ref={host}>{children}</div>
         <div className={`pen-layer${on && !readOnly ? ' on' : ''}`}>
-          <InkCanvas ref={canvas} doc={doc} canvasId="overlay" height={logicalH} minHeight={logicalH} readOnly={!on || readOnly} zoomable={false} />
+          <InkCanvas ref={canvas} doc={doc} canvasId="overlay" height={logicalH} minHeight={logicalH} readOnly={!on || readOnly} zoomable={false}
+            anchorFor={anchorFor} offsetOf={offsetOf} redrawKey={layoutKey} />
         </div>
       </div>
     </>
