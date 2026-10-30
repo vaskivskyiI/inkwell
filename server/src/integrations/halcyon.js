@@ -45,7 +45,7 @@ async function fromEach(list, fn) {
 // Halcyon behind a private certificate authority or with a self-signed certificate: its CA (PEM) is added to Node's
 // roots, or — when the user chose so — the certificate is not checked. Otherwise plain fetch, as before.
 const tlsOptions = (t) => (t?.insecure ? { rejectUnauthorized: false } : t?.ca ? { ca: [...tls.rootCertificates, t.ca] } : null);
-function postJson(url, { headers, body, signal, tls: t }) {
+export function postJson(url, { headers, body, signal, tls: t }) {
   const opts = url.startsWith('https:') && tlsOptions(t);
   if (!opts) return fetch(url, { method: 'POST', headers, body, signal });
   return new Promise((resolve, reject) => {

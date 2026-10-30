@@ -8,6 +8,8 @@ export function AuthPage({ onDone }) {
   const [f, setF] = useState({ name: '', email: '', password: '' });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const failed = new URLSearchParams(location.search).get('sso_error');
+  const viaHalcyon = () => { try { sessionStorage.setItem('afterLogin', location.hash); } catch { /* only comes back to the home page then */ } location.href = '/api/auth/halcyon/start'; };
   const submit = async (e) => {
     e.preventDefault();
     setErr(''); setBusy(true);
@@ -21,8 +23,9 @@ export function AuthPage({ onDone }) {
         {mode === 'signup' && <input placeholder="Your name" autoComplete="name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />}
         <input type="email" placeholder="E-mail" autoComplete="email" required value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
         <input type="password" placeholder="Password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} required minLength={mode === 'signup' ? 8 : 1} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
-        {err && <p className="error">{err}</p>}
+        {(err || failed) && <p className="error">{err || failed}</p>}
         <button className="primary" disabled={busy}>{busy ? '…' : mode === 'signup' ? 'Create account' : 'Sign in'}</button>
+        {auth?.halcyonLogin && !auth.needsSetup && <button type="button" onClick={viaHalcyon}>Sign in with Halcyon</button>}
         {!auth?.needsSetup && auth?.allowSignup && (
           <button type="button" className="link" onClick={() => setMode(mode === 'signup' ? 'login' : 'signup')}>{mode === 'signup' ? 'I already have an account' : 'Create an account'}</button>
         )}

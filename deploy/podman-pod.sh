@@ -67,6 +67,11 @@ INKWELL_AI_KEY=
 INKWELL_AI_CHAT_MODEL=
 INKWELL_AI_VISION_MODEL=
 INKWELL_AI_EMBED_MODEL=
+# Sign in with Halcyon (same secret as HALCYON_SSO_SECRET; INKWELL_PUBLIC_URL must be set); see docs/HANDOFF.md
+INKWELL_HALCYON_URL=
+INKWELL_HALCYON_SECRET=
+# A PEM file inside the container when Halcyon has a private certificate authority
+INKWELL_HALCYON_CA=
 EOF
   echo "==> Created $ENVFILE (back it up: it holds the encryption key and the database password)"
 }

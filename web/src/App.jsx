@@ -16,6 +16,8 @@ async function boot() {
   const st = await get('/api/auth/state');
   store.set({ authState: st, user: st.user });
   if (!st.user) return;
+  // Back from signing in with Halcyon: on to where the link pointed.
+  try { const h = sessionStorage.getItem('afterLogin'); sessionStorage.removeItem('afterLogin'); if (h) location.hash = h; } catch { /* no storage: stays on the home page */ }
   const [spaces, settings, halcyon] = await Promise.all([loadSpaces(), get('/api/settings'), get('/api/integrations/halcyon').catch(() => ({ connected: false }))]);
   store.set({ settings, halcyon });
   const first = store.get().spaceId;

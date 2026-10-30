@@ -43,6 +43,7 @@ async function saveSettings(patchObj) {
 
 function Profile() {
   const user = useStore((s) => s.user);
+  const halcyonLogin = useStore((s) => s.authState?.halcyonLogin);
   const [name, setName] = useState(user.name);
   const [color, setColor] = useState(user.color);
   const [pw, setPw] = useState({ password: '', newPassword: '' });
@@ -56,6 +57,9 @@ function Profile() {
       <Field label="Colour" hint="Your cursor and avatar colour for co-editors."><input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></Field>
       <Field label="E-mail"><input value={user.email} disabled /></Field>
       <button className="primary" onClick={() => save().catch(toastError)}>Save</button>
+      {halcyonLogin && <><h3>Halcyon login</h3>
+        {user.halcyonLinked ? <p className="muted">Linked. You can sign in with Halcyon, and Halcyon's shared spaces appear here for you.</p>
+          : <><p className="muted">Sign in here with your Halcyon login, and get Halcyon's shared spaces as spaces here.</p><a className="button" href="/api/auth/halcyon/start?link=1">Link my Halcyon login</a></>}</>}
       <h3>Appearance</h3>
       <div className="seg">{['system', 'light', 'dark'].map((t) => <button key={t} className={theme === t ? 'on' : ''} onClick={() => { setThemePref(t); setTheme(t); }}>{t[0].toUpperCase() + t.slice(1)}</button>)}</div>
       <h3>Password</h3>

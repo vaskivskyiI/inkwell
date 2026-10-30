@@ -21,6 +21,10 @@ export const config = {
   memoryDb: env.INKWELL_DB === 'memory',
   secret: env.INKWELL_SECRET || '',
   publicUrl: (env.INKWELL_PUBLIC_URL || '').replace(/\/+$/, ''),
+  // Sign in with Halcyon: its address and the secret set on both sides (HALCYON_SSO_SECRET); a PEM file behind a private CA.
+  halcyonUrl: (env.INKWELL_HALCYON_URL || '').replace(/\/+$/, ''),
+  halcyonSecret: env.INKWELL_HALCYON_SECRET || '',
+  halcyonCa: env.INKWELL_HALCYON_CA || '',
   secureCookies: bool(env.INKWELL_SECURE_COOKIES),
   trustProxy: env.INKWELL_TRUST_PROXY || '127.0.0.1,::1',
   allowSignup: bool(env.INKWELL_ALLOW_SIGNUP, true),

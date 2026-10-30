@@ -8,9 +8,9 @@ import { getServerSetting } from './settings.js';
 export const COOKIE = 'inkwell_session';
 const SESSION_DAYS = 60;
 const COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6'];
-const PUBLIC = /^\/api\/(health|auth\/(state|login|signup))(\/|$|\?)|^\/api\/public\//;
+const PUBLIC = /^\/api\/(health|auth\/(state|login|signup|halcyon))(\/|$|\?)|^\/api\/public\//;
 
-export const publicUser = (u) => u && ({ id: u.id, email: u.email, name: u.name, color: u.color, isAdmin: u.is_admin });
+export const publicUser = (u) => u && ({ id: u.id, email: u.email, name: u.name, color: u.color, isAdmin: u.is_admin, halcyonLinked: !!u.halcyon_sub });
 
 export async function createSession(userId, { kind = 'web', name = '', ua = '' } = {}) {
   const token = `${kind === 'api' ? 'ink_' : ''}${randomToken()}`;
@@ -77,7 +77,7 @@ export default async function authRoutes(app) {
   app.get('/api/auth/state', async (req) => {
     const u = await authenticate(req);
     const hasUsers = !!(await one('SELECT 1 FROM users LIMIT 1'));
-    return { user: publicUser(u), needsSetup: !hasUsers, allowSignup: !hasUsers || (await getServerSetting('allowSignup', config.allowSignup)) };
+    return { user: publicUser(u), needsSetup: !hasUsers, allowSignup: !hasUsers || (await getServerSetting('allowSignup', config.allowSignup)), halcyonLogin: !!(config.halcyonUrl && config.halcyonSecret) };
   });
 
   app.post('/api/auth/signup', async (req, reply) => {
@@ -175,6 +175,6 @@ export default async function authRoutes(app) {
   });
 }
 
-function setCookie(reply, token) {
+export function setCookie(reply, token) {
   reply.setCookie(COOKIE, token, { path: '/', httpOnly: true, sameSite: 'lax', secure: config.secureCookies, maxAge: SESSION_DAYS * 86400 });
 }

@@ -38,7 +38,8 @@ async function spaceForLabel(userId, label) {
   const rows = await many(`SELECT s.id, s.name, s.settings_json FROM spaces s JOIN space_members m ON m.space_id = s.id AND m.user_id = $1
     WHERE m.role IN ('owner', 'editor') ORDER BY m.position`, userId);
   const l = String(label).toLowerCase();
-  return (rows.find((s) => String(s.settings_json?.halcyonSpace ?? '').toLowerCase() === l)
+  return (rows.find((s) => s.settings_json?.halcyonShared && s.name.toLowerCase() === l) // the mirror of a shared space
+    || rows.find((s) => String(s.settings_json?.halcyonSpace ?? '').toLowerCase() === l)
     || rows.find((s) => s.settings_json?.halcyonSpace == null && s.name.toLowerCase() === l))?.id || null;
 }
 

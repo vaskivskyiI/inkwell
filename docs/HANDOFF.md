@@ -97,3 +97,7 @@ MCP endpoint (no Halcyon changes needed for the Inkwell → Halcyon direction).
 - Items carry `meta.conn`. Links without it, or with another member's id, go through `tryEach`, which tries each connection in turn.
 - `scopesFor(userId, spaceId)` decides which mailboxes an Inkwell space shows: the connection chosen in the space, else one with the space's name, else all; among several, those with a matching Halcyon space win.
 - Gaps: a deep link for an event or task from Halcyon has no connection, so its note goes by `hspace`; "Open in Halcyon" does not switch Halcyon to the shared space.
+
+## Sign in with Halcyon and mirrored shared spaces
+- `sso.js`: INKWELL_HALCYON_URL + INKWELL_HALCYON_SECRET (Halcyon: HALCYON_SSO_SECRET, HALCYON_SSO_REDIRECTS = `<public url>/api/auth/halcyon/callback`). `users.halcyon_sub` links a login. An account with the same e-mail is never taken over: it links itself under Settings → Profile. Passwords keep working.
+- `mirror.js` (every 5 min and after a Halcyon sign-in): each Halcyon shared space gets one space (`settings.halcyonShared`), members follow Halcyon for linked users only. Hand-added people, the owner and all pages stay; an existing space with pages is not adopted; only an empty default twin is removed.

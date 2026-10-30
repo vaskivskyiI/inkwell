@@ -244,6 +244,10 @@ const MIGRATIONS = [
   CREATE INDEX integrations_user ON integrations(user_id, kind, created_at);
   UPDATE integrations SET name = 'My mail' WHERE kind = 'halcyon';
   `,
+  // 5 — the Halcyon login this user signs in with ("Sign in with Halcyon"); it also decides shared spaces (mirror.js)
+  `
+  ALTER TABLE users ADD COLUMN halcyon_sub text UNIQUE;
+  `,
 ];
 
 export async function migrate(db) {

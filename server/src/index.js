@@ -15,6 +15,8 @@ import assetRoutes, { deleteOrphanFiles, collectAssets } from './assets.js';
 import searchRoutes from './search.js';
 import aiRoutes from './routes/ai.js';
 import linkRoutes from './links.js';
+import ssoRoutes from './sso.js';
+import { mirrorSpaces } from './mirror.js';
 import halcyonRoutes from './integrations/halcyon.js';
 import importRoutes from './importers/index.js';
 import commentRoutes from './comments.js';
@@ -60,6 +62,7 @@ export async function buildServer() {
   await app.register(searchRoutes);
   await app.register(aiRoutes);
   await app.register(linkRoutes);
+  await app.register(ssoRoutes);
   await app.register(halcyonRoutes);
   await app.register(importRoutes);
   await app.register(commentRoutes);
@@ -103,6 +106,8 @@ function housekeeping() {
   setInterval(run, 6 * 3600e3).unref();
   // Tasks completed in Halcyon tick their to-dos here.
   setInterval(() => pullAll().catch((e) => log.warn('task pull', e.message)), 5 * 60e3).unref();
+  // Who is in Halcyon's shared spaces.
+  setInterval(() => mirrorSpaces().catch((e) => log.warn('space mirror', e.message)), 5 * 60e3).unref();
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
