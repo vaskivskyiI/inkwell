@@ -11,6 +11,7 @@ import { Menu } from './ui/Menu.jsx';
 import { EmojiPicker } from './ui/EmojiPicker.jsx';
 import { RightPanel } from './RightPanel.jsx';
 import { TagBar, PenLayer, Connections } from './PageExtras.jsx';
+import { LinkedItems } from './LinkedItems.jsx';
 
 export function NoteView({ id }) {
   const user = useStore((s) => s.user);
@@ -72,6 +73,7 @@ export function NoteView({ id }) {
             <span title={new Date(detail.updatedAt).toLocaleString()}>Edited {stamp(detail.updatedAt)}{detail.updatedByUser ? ` by ${detail.updatedByUser.name}` : ''}</span>
           </div>
           {ready && <TagBar detail={detail} doc={handle.doc} readOnly={readOnly} />}
+          <LinkedItems noteId={id} />
           {detail.deletedAt && <div className="banner">This page is in the trash. <button onClick={() => post(`/api/notes/${id}/restore`).then(loadDetail).catch(toastError)}>Restore</button></div>}
           {!ready ? <div className="note-loading"><span className="spinner" /></div>
             : detail.kind === 'journal' ? <JournalView note={detail} doc={handle.doc} readOnly={readOnly} />

@@ -150,6 +150,23 @@ export default async function linkRoutes(app) {
     return { outgoing: out, backlinks: back, related: rel, unlinked };
   });
 
+  // The text of a linked e-mail and its conversation, read from Halcyon when asked; Inkwell keeps none of it.
+  app.get('/api/notes/:id/links/:linkId/mail', async (req) => {
+    const n = await needNote(req.user.id, req.params.id);
+    const l = isUuid(req.params.linkId) ? await one("SELECT ref FROM note_links WHERE id = $1 AND note_id = $2 AND kind = 'email'", req.params.linkId, n.id) : null;
+    if (!l) fail(404, 'Not found');
+    const conn = await connection(req.user.id);
+    if (!conn) fail(409, 'Connect Halcyon first (Settings → Integrations)');
+    const id = Number(l.ref);
+    // A token reads one Halcyon mailbox: mail of a shared space needs that space's token.
+    const c = await call(conn, 'get_conversation', { message_id: id }).catch((e) => {
+      if (/No message/.test(e.message)) fail(404, 'The Halcyon token here cannot read this e-mail (it may be in a shared space)');
+      throw e;
+    });
+    const list = c?.messages?.length ? c.messages : [await call(conn, 'get_message', { id })];
+    return { summary: c?.summary || null, messages: list.map((m) => ({ id: m.id, from: m.from, to: m.to, date: m.date, subject: m.subject, attachments: m.attachments || [], text: m.text_untrusted || '' })) };
+  });
+
   app.delete('/api/notes/:id/links/:linkId', async (req) => {
     const n = await needNote(req.user.id, req.params.id, 'editor');
     await q('DELETE FROM note_links WHERE id = $1 AND note_id = $2', isUuid(req.params.linkId) ? req.params.linkId : null, n.id);

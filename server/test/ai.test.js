@@ -115,6 +115,7 @@ test('Halcyon: connect, search, meeting note from an event, action items become 
         list_tasks: [{ id: 7, title: 'Existing task', due: null, done: false }],
         list_events: [{ id: 99, title: 'Design review', start: new Date().toISOString(), end: new Date(Date.now() + 36e5).toISOString(), local_start: '10:00', all_day: false, location: 'Room 4', attendees: ['Ann', 'Bob'] }],
         search_mail: [{ id: 501, subject: 'Budget draft', from: 'Bob <bob@x.y>', date: '2026-10-01T10:00:00Z', summary: 'Bob sends the budget' }],
+        get_conversation: { summary: 'Budget agreed', messages: [{ id: 501, from: 'Bob <bob@x.y>', date: '2026-10-01T10:00:00Z', subject: 'Budget draft', attachments: ['b.xlsx'], text_untrusted: 'Here is the budget.' }] },
         create_task: { id: 1000 + calls.length, title: params.arguments.title },
       }[params.name];
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: Array.isArray(data) ? { items: data } : data } }));
@@ -141,7 +142,11 @@ test('Halcyon: connect, search, meeting note from an event, action items become 
     assert.equal(links[0].kind, 'event');
     assert.match(links[0].openUrl, /#\/calendar$/);
     await ann.post(`/api/notes/${note.id}/links`, mail[0]);
-    assert.match((await ann.get(`/api/notes/${note.id}/links`)).find((l) => l.kind === 'email').openUrl, /#\/mail\/unified\/501$/);
+    const emailLink = (await ann.get(`/api/notes/${note.id}/links`)).find((l) => l.kind === 'email');
+    assert.match(emailLink.openUrl, /#\/mail\/unified\/501$/);
+    const shown = await ann.get(`/api/notes/${note.id}/links/${emailLink.id}/mail`);
+    assert.deepEqual([shown.summary, shown.messages[0].text, shown.messages[0].attachments], ['Budget agreed', 'Here is the budget.', ['b.xlsx']]);
+    assert.equal(await ann.status('GET', `/api/notes/${note.id}/links/${links[0].id}/mail`), 404, 'only e-mails');
     const t = await ann.post(`/api/notes/${note.id}/tasks`, { items: [{ text: 'Send slides', due: '2026-11-02' }] });
     assert.equal(t.created.length, 1);
     assert.equal(calls.at(-1).name, 'create_task');
