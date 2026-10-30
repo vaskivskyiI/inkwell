@@ -235,6 +235,15 @@ const MIGRATIONS = [
   ALTER TABLE assets ADD COLUMN orphaned_at bigint;
   CREATE INDEX assets_sha ON assets(space_id, sha256);
   `,
+  // 4 — one Halcyon token reads one mailbox (the person's own or a shared space), so a user can hold several
+  `
+  ALTER TABLE integrations ADD COLUMN id uuid NOT NULL DEFAULT gen_random_uuid();
+  ALTER TABLE integrations ADD COLUMN name text NOT NULL DEFAULT '';
+  ALTER TABLE integrations DROP CONSTRAINT integrations_pkey;
+  ALTER TABLE integrations ADD PRIMARY KEY (id);
+  CREATE INDEX integrations_user ON integrations(user_id, kind, created_at);
+  UPDATE integrations SET name = 'My mail' WHERE kind = 'halcyon';
+  `,
 ];
 
 export async function migrate(db) {

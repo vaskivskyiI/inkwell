@@ -177,7 +177,6 @@ const dueOf = (iso) => {
 
 /** Today with Halcyon: meetings, open tasks and e-mails waiting for the user — each one a click from its note. */
 function Today({ highlight }) {
-  const halcyon = useStore((s) => s.halcyon);
   const [data, setData] = useState({ events: null, tasks: null, mail: null });
   const [notes, setNotes] = useState({}); // "kind:ref" → note id
   useEffect(() => {
@@ -202,12 +201,11 @@ function Today({ highlight }) {
     const meta = it.kind === 'event' ? { ...it.meta, day: it.meta.allDay ? it.meta.start.slice(0, 10) : localDay(new Date(it.meta.start)) } : it.meta;
     try { openNote((await noteForItem(it.kind, it.ref, it.title, meta)).id); } catch (e) { toastError(e); }
   };
-  const ext = (it) => `${halcyon.baseUrl}/#/${it.kind === 'email' ? `mail/unified/${it.ref}` : it.kind === 'event' ? 'calendar' : 'tasks'}`;
   const row = (it, when, late, sub) => (
     <div key={`${it.kind}:${it.ref}`} className="today-item">
       <span className={`when${late ? ' late' : ''}`}>{when}</span>
-      <span className="grow"><b>{it.title}</b>{sub && <span className="sub">{sub}</span>}</span>
-      <a className="ext" href={ext(it)} title="Open in Halcyon"><ExternalLink size={14} /></a>
+      <span className="grow"><b>{it.title}</b>{(sub || it.meta.source) && <span className="sub">{[it.meta.source, sub].filter(Boolean).join(' · ')}</span>}</span>
+      <a className="ext" href={it.openUrl} title="Open in Halcyon"><ExternalLink size={14} /></a>
       <button onClick={() => open(it)}>{notes[`${it.kind}:${it.ref}`] ? <><NotebookText size={14} /> Open note</> : <><FilePlus2 size={14} /> Note</>}</button>
     </div>
   );

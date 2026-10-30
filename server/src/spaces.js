@@ -145,5 +145,7 @@ function pickSpaceSettings(s) {
   if (s.aiEnabled !== undefined) out.aiEnabled = !!s.aiEnabled;
   // The associated Halcyon space: null = the one with the same name, '' = none.
   if (s.halcyonSpace !== undefined) out.halcyonSpace = s.halcyonSpace === null ? null : str(s.halcyonSpace, 40);
+  // The Halcyon connection of the member who set it; others keep the automatic choice. null = automatic.
+  if (s.halcyonConnection !== undefined) out.halcyonConnection = s.halcyonConnection === null ? null : str(s.halcyonConnection, 40);
   return out;
 }

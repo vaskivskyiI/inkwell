@@ -6,7 +6,7 @@
 // there is seen as a moved due date, and a tick here is sent once only (each send would complete one more occurrence).
 import { many, q } from './db/index.js';
 import { registerHandler, enqueue } from './ai/queue.js';
-import { connection, call } from './integrations/halcyon.js';
+import { connections, tryEach, call } from './integrations/halcyon.js';
 import { readDoc, withDoc } from './collab.js';
 import { todosOf, setTodoChecked } from './docmodel.js';
 import { logger } from './util/log.js';
@@ -26,32 +26,37 @@ export async function queueOutgoing(userId, noteId, doc) {
 }
 
 registerHandler('tasksync', async (job) => {
-  const conn = await connection(job.user_id);
-  if (!conn) return;
+  const conns = await connections(job.user_id);
+  if (!conns.length) return;
   const todos = new Map(todosOf(await readDoc(job.ref)).map((t) => [norm(t.text), t.checked]));
   for (const l of await linksOf(job.ref)) {
     const checked = todos.get(norm(l.title));
     if (checked === undefined || checked === !!l.meta_json?.done) continue;
     // Unticking cannot take back a completed occurrence.
     if (l.meta_json?.repeats && !checked) { await setMeta(l, { done: false }); continue; }
-    const out = await call(conn, 'complete_task', { id: Number(l.ref), done: checked });
-    await setMeta(l, { done: checked, ...(out?.completed_id ? { repeats: true, seenDue: out.next_due ?? null } : {}) });
+    const { conn, out } = await tryEach(conns, l.meta_json?.conn, (c) => call(c, 'complete_task', { id: Number(l.ref), done: checked }));
+    await setMeta(l, { done: checked, conn: l.meta_json?.conn ?? conn.id, ...(out?.completed_id ? { repeats: true, seenDue: out.next_due ?? null } : {}) });
   }
 });
 
 /** Ticks to-dos of tasks completed (or reopened) in Halcyon. */
 export async function pullTasks(user) {
-  const conn = await connection(user.id);
-  if (!conn) return { changed: 0 };
+  const conns = await connections(user.id);
+  if (!conns.length) return { changed: 0 };
   const links = await many(`SELECT l.id, l.note_id, l.ref, l.title, l.meta_json FROM note_links l JOIN notes n ON n.id = l.note_id
     JOIN space_members m ON m.space_id = n.space_id AND m.user_id = $1 WHERE l.kind = 'task' AND n.deleted_at IS NULL AND l.ref ~ '^[0-9]+$'`, user.id);
   if (!links.length) return { changed: 0 };
-  const ids = [...new Set(links.map((l) => Number(l.ref)))];
-  const tasks = new Map(((await call(conn, 'list_tasks', { include_done: true, ids }).catch(() => [])) || []).map((t) => [String(t.id), t]));
+  const known = (l) => conns.some((c) => c.id === l.meta_json?.conn);
+  const found = new Map(); // link → its task, from the link's connection, or the first that has it
+  for (const c of conns) {
+    const mine = links.filter((l) => (known(l) ? l.meta_json.conn === c.id : !found.has(l)));
+    if (!mine.length) continue;
+    const ids = [...new Set(mine.map((l) => Number(l.ref)))];
+    const tasks = new Map(((await call(c, 'list_tasks', { include_done: true, ids }).catch(() => [])) || []).map((t) => [String(t.id), t]));
+    for (const l of mine) if (tasks.has(l.ref)) found.set(l, tasks.get(l.ref)); // missing: deleted or out of the token's space
+  }
   let changed = 0;
-  for (const l of links) {
-    const t = tasks.get(l.ref); // missing: deleted or out of the token's space
-    if (!t) continue;
+  for (const [l, t] of found) {
     const m = l.meta_json || {};
     let done = !!t.done;
     // A repeating task's last occurrence ends as plain done.
@@ -70,6 +75,6 @@ export async function pullTasks(user) {
 }
 
 export async function pullAll() {
-  const users = await many("SELECT u.id, u.name FROM users u JOIN integrations i ON i.user_id = u.id AND i.kind = 'halcyon' WHERE NOT u.disabled");
+  const users = await many("SELECT DISTINCT u.id, u.name FROM users u JOIN integrations i ON i.user_id = u.id AND i.kind = 'halcyon' WHERE NOT u.disabled");
   for (const u of users) await pullTasks(u).catch((e) => log.warn(`pull for ${u.id}: ${e.message}`));
 }

@@ -70,7 +70,6 @@ function Spaces() {
   const spaces = useStore((s) => s.spaces);
   const halcyon = useStore((s) => s.halcyon);
   const [hspaces, setHspaces] = useState([]);
-  useEffect(() => { if (halcyon?.connected) get('/api/halcyon/spaces').then(setHspaces).catch(() => {}); }, [halcyon?.connected]);
   const route = useStore((s) => s.route);
   const [sel, setSel] = useState(route.query.space || spaces[0]?.id);
   const space = spaces.find((s) => s.id === sel) || spaces[0];
@@ -79,6 +78,8 @@ function Spaces() {
   const [edit, setEdit] = useState(null);
   const owner = space?.role === 'owner';
   const loadMembers = () => space && get(`/api/spaces/${space.id}/members`).then(setMembers).catch(toastError);
+  const hconn = space?.settings?.halcyonConnection;
+  useEffect(() => { if (halcyon?.connected) get(`/api/halcyon/spaces${hconn ? `?connection=${hconn}` : ''}`).then(setHspaces).catch(() => {}); }, [halcyon?.connected, hconn]);
   useEffect(() => { loadMembers(); setEdit(space ? { name: space.name, icon: space.icon, color: space.color } : null); }, [space?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!space) return null;
   const me = store.get().user;
@@ -103,6 +104,14 @@ function Spaces() {
             Only local AI for this space <span className="hint">— pages here are never sent to cloud AI providers (Ollama / LAN servers only).</span></label>
           <label className="check"><input type="checkbox" checked={space.settings?.aiEnabled !== false} onChange={(e) => patch(`/api/spaces/${space.id}`, { settings: { aiEnabled: e.target.checked } }).then(loadSpaces).catch(toastError)} /> AI features in this space</label>
         </>
+      )}
+      {owner && halcyon?.connections?.length > 1 && (
+        <Field label="Halcyon mailbox" hint="Whose mail, calendar and tasks this space shows. Automatic: the connection with the same name as this space, otherwise all of them.">
+          <select value={halcyon.connections.some((c) => c.id === hconn) ? hconn : ''} onChange={(e) => patch(`/api/spaces/${space.id}`, { settings: { halcyonConnection: e.target.value || null } }).then(loadSpaces).catch(toastError)}>
+            <option value="">Automatic</option>
+            {halcyon.connections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
       )}
       {owner && halcyon?.connected && (
         <Field label="Halcyon space" hint="Today on the home page shows this space's meetings, tasks and e-mails from Halcyon, and notes from Halcyon land here. Automatic: the Halcyon space with the same name.">
@@ -302,31 +311,55 @@ function PenSettings() {
 
 function Integrations() {
   const halcyon = useStore((s) => s.halcyon);
-  const [form, setForm] = useState({ baseUrl: '', token: '', tls: { mode: 'check', ca: '' } });
+  const list = halcyon?.connections || [];
+  const blank = { name: '', baseUrl: list[0]?.baseUrl || '', token: '', tls: { mode: 'check', ca: '' } };
+  const [form, setForm] = useState(null);
+  const shown = form || (list.length ? null : blank);
   const [busy, setBusy] = useState(false);
-  const tlsBody = form.tls.mode === 'skip' ? { insecure: true } : form.tls.mode === 'ca' ? { ca: form.tls.ca } : undefined;
-  const connect = async () => {
+  const set = (patchObj) => setForm({ ...shown, ...patchObj });
+  const tlsBody = (t) => (t.mode === 'keep' ? undefined : t.mode === 'skip' ? { insecure: true } : t.mode === 'ca' ? { ca: t.ca } : {});
+  const save = async () => {
     setBusy(true);
-    try { const r = await put('/api/integrations/halcyon', { baseUrl: form.baseUrl, token: form.token, tls: tlsBody }); store.set({ halcyon: r }); toast('Halcyon connected'); } catch (e) { toastError(e); } finally { setBusy(false); }
+    try {
+      const body = { name: shown.name, baseUrl: shown.baseUrl, token: shown.token, tls: tlsBody(shown.tls) };
+      const r = await (shown.id ? patch(`/api/integrations/halcyon/connections/${shown.id}`, body) : post('/api/integrations/halcyon/connections', body));
+      store.set({ halcyon: r }); setForm(null); toast(shown.id ? 'Connection saved' : 'Halcyon connected');
+    } catch (e) { toastError(e); } finally { setBusy(false); }
   };
+  const remove = (c) => { if (window.confirm(`Remove the connection “${c.name}”? Links on your pages stay.`)) del(`/api/integrations/halcyon/connections/${c.id}`).then((r) => store.set({ halcyon: r })).catch(toastError); };
   return (
     <>
       <h2>Integrations</h2>
       <h3>Halcyon — mail, calendar & tasks</h3>
       <p>Link pages with e-mails, meetings and tasks, start meeting notes from your calendar and send action items to your task list.</p>
-      {halcyon?.connected ? (
-        <div className="row"><Check size={16} /> Connected to <b>{halcyon.baseUrl}</b>{halcyon.settings?.tls?.insecure ? <span className="muted small"> · certificate not checked</span> : halcyon.settings?.tls?.ca ? <span className="muted small"> · own certificate authority</span> : null}<span className="grow" /><button onClick={() => del('/api/integrations/halcyon').then(() => store.set({ halcyon: { connected: false } })).catch(toastError)}>Disconnect</button></div>
-      ) : (
-        <>
-          <ol className="hint">
-            <li>In Halcyon open <b>Settings → Assistants</b> and create a token for “Inkwell” (choose <i>propose</i> access so Inkwell can add tasks).</li>
-            <li>Paste Halcyon's address and the token here.</li>
-          </ol>
-          <Field label="Halcyon address"><input value={form.baseUrl} placeholder="https://mail.example.com" onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} /></Field>
-          <Field label="Assistant token"><input type="password" value={form.token} placeholder="hmcp_…" onChange={(e) => setForm({ ...form, token: e.target.value })} /></Field>
-          {/^https:/i.test(form.baseUrl.trim()) && <CertField value={form.tls} onChange={(tls) => setForm({ ...form, tls })} />}
-          <button className="primary" disabled={busy || !form.baseUrl || !form.token} onClick={connect}>{busy ? 'Checking…' : 'Connect'}</button>
-        </>
+      {list.map((c, i) => (
+        <div key={c.id} className="provider">
+          <Check size={16} /> <b>{c.name}</b>
+          <span className="muted small">{c.baseUrl}{i === 0 && list.length > 1 ? ' · main' : ''}{c.settings?.tls?.insecure ? ' · certificate not checked' : c.settings?.tls?.ca ? ' · own certificate authority' : ''}</span>
+          <span className="grow" />
+          <button onClick={() => setForm({ id: c.id, name: c.name, baseUrl: c.baseUrl, token: '', tls: { mode: 'keep', ca: '' } })}><Pencil size={14} /> Edit</button>
+          <button className="icon small" onClick={() => remove(c)} aria-label={`Remove ${c.name}`}><Trash2 size={14} /></button>
+        </div>
+      ))}
+      {!shown && <button onClick={() => setForm(blank)}><Plus size={14} /> Add a mailbox or shared space</button>}
+      {list.length > 0 && <p className="hint">Each Halcyon token reads one mailbox: your own mail, or one shared space. Add one connection for each. Tasks and meetings from all of them appear here; to tie a connection to an Inkwell space, give both the same name or choose it under Spaces & sharing.</p>}
+      {shown && (
+        <div className={list.length ? 'card-form' : ''}>
+          {!shown.id && (
+            <ol className="hint">
+              <li>In Halcyon open <b>Settings → Assistants</b> and create a token for “Inkwell”. Choose whose mail it reads: your own, or a shared space. Choose <i>propose</i> access so Inkwell can add tasks.</li>
+              <li>Paste Halcyon's address and the token here.</li>
+            </ol>
+          )}
+          <Field label="Name" hint="Shown next to items when you have several connections."><input value={shown.name} placeholder={list.length ? 'e.g. Lab shared' : 'My mail'} onChange={(e) => set({ name: e.target.value })} /></Field>
+          <Field label="Halcyon address"><input value={shown.baseUrl} placeholder="https://mail.example.com" onChange={(e) => set({ baseUrl: e.target.value })} /></Field>
+          <Field label={shown.id ? 'New assistant token' : 'Assistant token'} hint={shown.id ? 'Leave empty to keep the saved token.' : undefined}><input type="password" autoComplete="new-password" value={shown.token} placeholder="hmcp_…" onChange={(e) => set({ token: e.target.value })} /></Field>
+          {/^https:/i.test(shown.baseUrl.trim()) && <CertField value={shown.tls} onChange={(tls) => set({ tls })} />}
+          <div className="row">
+            <button className="primary" disabled={busy || !shown.baseUrl || (!shown.id && !shown.token)} onClick={save}>{busy ? 'Checking…' : shown.id ? 'Save' : 'Connect'}</button>
+            {form && list.length > 0 && <button onClick={() => setForm(null)}>Cancel</button>}
+          </div>
+        </div>
       )}
     </>
   );
@@ -350,6 +383,7 @@ function CertField({ value, onChange }) {
   return (
     <>
       <Field label="Halcyon's certificate"><select value={value.mode} onChange={(e) => onChange({ ...value, mode: e.target.value })}>
+        {value.mode === 'keep' && <option value="keep">Keep as saved</option>}
         <option value="check">Check as usual</option>
         <option value="ca">Trust my certificate authority (self-signed / own CA)</option>
         <option value="skip">Do not check (not safe)</option>

@@ -4,7 +4,7 @@ import { one, many, q, now } from './db/index.js';
 import { fail, str, isUuid } from './util/http.js';
 import { needNote, needSpace, userSpaceIds } from './spaces.js';
 import { publish } from './events.js';
-import { connection, openUrl, eventsOn, call } from './integrations/halcyon.js';
+import { connections, scopesFor, spaceForConnection, tryEach, openUrl, eventsOn, call } from './integrations/halcyon.js';
 import { createNote, noteOut } from './notes.js';
 import { docFrom, extract, markdownToBlocks } from './docmodel.js';
 import { TEMPLATES } from './templates.js';
@@ -13,7 +13,8 @@ import { config } from './config.js';
 const KINDS = ['note', 'email', 'event', 'task', 'contact', 'url'];
 // "2026-11-03 09:00" in the server's time zone (the pod runs in the host's zone, see deploy/podman-pod.sh).
 const localStamp = (d) => new Date(d).toLocaleString('sv-SE', { hour12: false }).slice(0, 16);
-const linkOut = (l, conn) => ({ id: l.id, kind: l.kind, ref: l.ref, title: l.title, meta: l.meta_json, createdAt: l.created_at, openUrl: l.kind === 'url' ? l.ref : openUrl(conn, l) });
+const connOf = (l, conns) => conns.find((c) => c.id === l.meta_json?.conn) || conns[0];
+const linkOut = (l, conns) => ({ id: l.id, kind: l.kind, ref: l.ref, title: l.title, meta: l.meta_json, createdAt: l.created_at, openUrl: l.kind === 'url' ? l.ref : openUrl(connOf(l, conns), l) });
 
 export async function addLink(userId, noteId, { kind, ref, title, meta }) {
   if (!KINDS.includes(kind)) fail(400, 'Unknown link kind');
@@ -57,20 +58,21 @@ export async function noteFromItem(userId, b) {
   if (same) return { ...noteOut(same), existing: true };
 
   const writable = async (id) => isUuid(id) && spaces.includes(id) && !!(await one("SELECT 1 FROM space_members WHERE space_id = $1 AND user_id = $2 AND role IN ('owner', 'editor')", id, userId));
-  // The item's own Halcyon space decides first; then earlier notes of this meeting; then the space the user is in;
+  // The item's mailbox and Halcyon space decide first; then earlier notes of this meeting; then the space the user is in;
   // then their first writable one.
-  const spaceId = (await spaceForLabel(userId, meta.hspace)) || ((await writable(linked[0]?.space_id)) ? linked[0].space_id : null)
+  const conns = await connections(userId);
+  const spaceId = (await spaceForConnection(userId, conns.find((c) => c.id === meta.conn))) || (await spaceForLabel(userId, meta.hspace)) || ((await writable(linked[0]?.space_id)) ? linked[0].space_id : null)
     || ((await writable(b.spaceId)) ? b.spaceId : null)
     || (await one("SELECT space_id FROM space_members WHERE user_id = $1 AND role IN ('owner', 'editor') ORDER BY position LIMIT 1", userId))?.space_id
     || fail(403, 'No space you can write in');
 
   let title = str(b.title, 300);
-  const conn = await connection(userId);
-  if (conn && kind === 'email' && (!title || !meta.from)) {
+  // A deep link from Halcyon does not say which mailbox the mail is in.
+  if (conns.length && kind === 'email' && (!title || !meta.from || !meta.conn)) {
     try {
-      const m = await call(conn, 'get_message', { id: Number(ref) });
+      const { conn, out: m } = await tryEach(conns, meta.conn, (c) => call(c, 'get_message', { id: Number(ref) }));
       title ||= m.subject || '';
-      Object.assign(meta, { from: meta.from || m.from, date: meta.date || m.date, summary: m.summary || '' });
+      Object.assign(meta, { conn: conn.id, from: meta.from || m.from, date: meta.date || m.date, summary: meta.summary || m.summary || '' });
     } catch { /* note without details */ }
   }
   const stamp = (d) => (d ? localStamp(d) : localStamp(Date.now()).slice(0, 10));
@@ -108,8 +110,8 @@ export async function noteFromItem(userId, b) {
 export default async function linkRoutes(app) {
   app.get('/api/notes/:id/links', async (req) => {
     await needNote(req.user.id, req.params.id);
-    const conn = await connection(req.user.id);
-    return (await many("SELECT * FROM note_links WHERE note_id = $1 AND kind <> 'mention' ORDER BY created_at", req.params.id)).map((l) => linkOut(l, conn));
+    const conns = await connections(req.user.id);
+    return (await many("SELECT * FROM note_links WHERE note_id = $1 AND kind <> 'mention' ORDER BY created_at", req.params.id)).map((l) => linkOut(l, conns));
   });
 
   app.post('/api/notes/:id/links', async (req) => {
@@ -124,7 +126,7 @@ export default async function linkRoutes(app) {
         publish(other.space_id, 'note:links', { noteId: other.id });
       }
     }
-    return linkOut(l, await connection(req.user.id));
+    return linkOut(l, await connections(req.user.id));
   });
 
   // Everything a page is connected to: pages it links/mentions, pages that link here, related pages (AI) and pages
@@ -153,14 +155,14 @@ export default async function linkRoutes(app) {
   // The text of a linked e-mail and its conversation, read from Halcyon when asked; Inkwell keeps none of it.
   app.get('/api/notes/:id/links/:linkId/mail', async (req) => {
     const n = await needNote(req.user.id, req.params.id);
-    const l = isUuid(req.params.linkId) ? await one("SELECT ref FROM note_links WHERE id = $1 AND note_id = $2 AND kind = 'email'", req.params.linkId, n.id) : null;
+    const l = isUuid(req.params.linkId) ? await one("SELECT ref, meta_json FROM note_links WHERE id = $1 AND note_id = $2 AND kind = 'email'", req.params.linkId, n.id) : null;
     if (!l) fail(404, 'Not found');
-    const conn = await connection(req.user.id);
-    if (!conn) fail(409, 'Connect Halcyon first (Settings → Integrations)');
+    const conns = await connections(req.user.id);
+    if (!conns.length) fail(409, 'Connect Halcyon first (Settings → Integrations)');
     const id = Number(l.ref);
     // A token reads one Halcyon mailbox: mail of a shared space needs that space's token.
-    const c = await call(conn, 'get_conversation', { message_id: id }).catch((e) => {
-      if (/No message/.test(e.message)) fail(404, 'The Halcyon token here cannot read this e-mail (it may be in a shared space)');
+    const { conn, out: c } = await tryEach(conns, l.meta_json?.conn, (x) => call(x, 'get_conversation', { message_id: id })).catch((e) => {
+      if (/No message/.test(e.message)) fail(404, 'No Halcyon connection here can read this e-mail. If it is in a shared space, add that space\'s token under Settings → Integrations');
       throw e;
     });
     const list = c?.messages?.length ? c.messages : [await call(conn, 'get_message', { id })];
@@ -231,8 +233,7 @@ export default async function linkRoutes(app) {
   // Action items (from the AI summary or chosen in the page) → Halcyon tasks, linked back to the page.
   app.post('/api/notes/:id/tasks', async (req) => {
     const n = await needNote(req.user.id, req.params.id, 'editor');
-    const conn = await connection(req.user.id);
-    if (!conn) fail(409, 'Connect Halcyon first (Settings → Integrations)');
+    const [{ conn }] = await scopesFor(req.user.id, n.space_id); // the mailbox of this page's space
     const items = (Array.isArray(req.body?.items) ? req.body.items : []).slice(0, 30);
     const out = [];
     for (const it of items) {
@@ -240,7 +241,7 @@ export default async function linkRoutes(app) {
       if (!title) continue;
       const t = await call(conn, 'create_task', { title, ...(it.due ? { due: str(it.due, 40) } : {}), notes: `From the Inkwell page "${n.title || 'Untitled'}"` });
       const ref = String(t?.id ?? t?.task?.id ?? title);
-      await addLink(req.user.id, n.id, { kind: 'task', ref, title, meta: { due: it.due || null } });
+      await addLink(req.user.id, n.id, { kind: 'task', ref, title, meta: { due: it.due || null, conn: conn.id } });
       out.push({ title, ref });
     }
     publish(n.space_id, 'note:links', { noteId: n.id });

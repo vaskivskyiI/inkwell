@@ -91,3 +91,9 @@ MCP endpoint (no Halcyon changes needed for the Inkwell → Halcyon direction).
 - Same bytes in a space reuse one `assets` row; across spaces rows differ but the file on disk is shared by sha256.
 - `collectAssets` (every 6 h): a file without references is marked and removed after `INKWELL_ASSET_GRACE_DAYS` (default 7). Trashed pages still count; version snapshots do not, so restoring an old version can show a missing file after that time.
 - Reading a file: member of its space, or of a space with a page that uses it.
+
+## Several Halcyon connections
+- A Halcyon token reads one mailbox (own or one shared space), so `integrations` holds one row per connection; the oldest is the main one.
+- Items carry `meta.conn`. Links without it, or with another member's id, go through `tryEach`, which tries each connection in turn.
+- `scopesFor(userId, spaceId)` decides which mailboxes an Inkwell space shows: the connection chosen in the space, else one with the space's name, else all; among several, those with a matching Halcyon space win.
+- Gaps: a deep link for an event or task from Halcyon has no connection, so its note goes by `hspace`; "Open in Halcyon" does not switch Halcyon to the shared space.
