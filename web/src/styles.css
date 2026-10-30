@@ -1,29 +1,30 @@
 :root {
-  --bg: #ffffff; --bg-soft: #f7f7f8; --bg-hover: #efeff1; --bg-active: #e7e7ea; --bg-raised: #ffffff;
-  --fg: #1f2328; --fg-soft: #3d434b; --muted: #6b7280; --border: #e5e7eb; --border-strong: #d1d5db;
-  --accent: #4f46e5; --accent-fg: #ffffff; --accent-soft: #eef2ff; --danger: #dc2626; --ok: #16a34a; --warn: #b45309;
-  --paper: #fffef9; --paper-line: #dbe4f0; --paper-dot: #c7cdd6; --mark: #fef08a;
-  --shadow: 0 8px 28px rgba(15, 23, 42, .12), 0 1px 3px rgba(15, 23, 42, .08);
-  --radius: 8px; --sidebar-w: 264px; --panel-w: 340px;
+  /* Same palette as Halcyon: the two apps should feel like one. */
+  --bg: #ffffff; --bg-soft: #f6f7f9; --bg-hover: #eef1f5; --bg-active: #e3e8f0; --bg-raised: #ffffff;
+  --fg: #1d2433; --fg-soft: #3f4757; --muted: #5b6474; --border: #e3e6eb; --border-strong: #d0d5dd;
+  --accent: #2563eb; --accent-fg: #ffffff; --accent-soft: #e8efff; --danger: #dc2626; --ok: #16a34a; --warn: #d97706; --ai: #0f766e; --ai-soft: #e8f4f2;
+  --rail: #f1f3f6; --paper: #fffef9; --paper-line: #dbe4f0; --paper-dot: #c7cdd6; --mark: #fef08a;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 8px 24px rgb(16 24 40 / 10%);
+  --radius: 10px; --sidebar-w: 264px; --panel-w: 340px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
   color-scheme: light;
 }
 :root[data-theme="dark"] {
-  --bg: #16171d; --bg-soft: #1c1d24; --bg-hover: #26272f; --bg-active: #2e2f38; --bg-raised: #212229;
-  --fg: #e6e7eb; --fg-soft: #c9cbd1; --muted: #9a9ea8; --border: #2c2e36; --border-strong: #3a3d47;
-  --accent: #818cf8; --accent-fg: #0f1020; --accent-soft: #272a4a; --danger: #f87171; --ok: #4ade80; --warn: #fbbf24;
-  --paper: #1b1c22; --paper-line: #2c3442; --paper-dot: #3a414d; --mark: #854d0e;
-  --shadow: 0 10px 30px rgba(0, 0, 0, .5), 0 1px 3px rgba(0, 0, 0, .4);
+  --bg: #161a22; --bg-soft: #0f1218; --bg-hover: #222834; --bg-active: #2a3140; --bg-raised: #1c212b;
+  --fg: #e6e9ef; --fg-soft: #c3c9d4; --muted: #a6aebb; --border: #262c38; --border-strong: #343b49;
+  --accent: #4f8cff; --accent-fg: #0b1220; --accent-soft: #1b2a4a; --danger: #f87171; --ok: #4ade80; --warn: #fbbf24; --ai: #5ec8b8; --ai-soft: #14302c;
+  --rail: #1c212b; --paper: #1b1f28; --paper-line: #2c3442; --paper-dot: #3a414d; --mark: #854d0e;
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 30px rgb(0 0 0 / 45%);
   color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
-body { font: 15px/1.5 var(--font); color: var(--fg); background: var(--bg); -webkit-font-smoothing: antialiased; }
+body { font: 14px/1.5 var(--font); color: var(--fg); background: var(--bg); -webkit-font-smoothing: antialiased; }
 a { color: var(--accent); text-decoration: none; }
 button, input, select, textarea { font: inherit; color: inherit; }
-button { cursor: pointer; border: 1px solid var(--border); background: var(--bg-raised); border-radius: 6px; padding: 6px 12px; display: inline-flex; align-items: center; gap: 6px; transition: background .12s, border-color .12s; }
+button { cursor: pointer; border: 1px solid var(--border-strong); background: var(--bg-raised); border-radius: 8px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px; transition: background .12s, border-color .12s; }
 button:hover:not(:disabled) { background: var(--bg-hover); }
 button:disabled { opacity: .5; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
@@ -387,3 +388,33 @@ table.members td:first-child { display: flex; align-items: center; gap: 8px; }
 .today-item a.ext { color: var(--muted); display: inline-flex; }
 .today-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 @media (max-width: 1000px) { .today-grid { grid-template-columns: 1fr; } }
+
+/* ---------- rail (as in Halcyon) */
+.rail { width: 60px; flex: none; background: var(--rail); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 4px; }
+.rail .logo { width: 34px; height: 34px; margin-bottom: 10px; border-radius: 9px; }
+.rail > a, .rail > button, .rail .menu > button { width: 44px; height: 44px; border: 0; background: none; border-radius: 10px; color: var(--muted); cursor: pointer; display: grid; place-items: center; padding: 0; }
+.rail > a:hover, .rail > button:hover, .rail .menu > button:hover { background: var(--bg-hover); color: var(--fg); }
+.rail > a.active, .rail .menu > button.active { background: var(--accent-soft); color: var(--accent); }
+.rail .space-initial { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .02em; }
+.rail .spacer { flex: 1; }
+.menu-pop.up { left: calc(100% + 6px); bottom: 0; top: auto; }
+.sidebar-title { display: flex; align-items: center; gap: 8px; font-weight: 600; padding: 6px 8px 8px; font-size: 15px; }
+.space-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 3px; font-size: 12.5px; font-weight: 600; color: var(--muted); cursor: pointer; border: 0; background: none; width: 100%; }
+.space-head .space-icon { width: 18px; height: 18px; font-size: 11px; border-radius: 5px; }
+.smart-row { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: transparent; padding: 3px 8px; border-radius: 6px; color: var(--fg-soft); font-size: 14px; justify-content: flex-start; text-align: left; }
+.smart-row:hover { background: var(--bg-hover); }
+.smart-row .count { margin-left: auto; font-size: 12px; color: var(--muted); }
+.note-view.wide .page-col { max-width: none; padding-left: 40px; padding-right: 40px; }
+.page-col.home.wide { max-width: none; padding-left: 40px; padding-right: 40px; }
+.home-head { display: flex; align-items: center; gap: 12px; }
+.home-head h1 { flex: 1; }
+.quick-note { display: flex; gap: 8px; margin-bottom: 26px; }
+.quick-note input[type=text] { flex: 1; }
+.page-col.home.wide .today-grid { grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+@media (max-width: 800px) {
+  .rail { position: fixed; z-index: 72; top: 0; bottom: 0; left: 0; }
+  .no-sidebar .rail { display: none; }
+  .sidebar { left: 60px; }
+  .desk-only { display: none !important; }
+  .note-view.wide .page-col, .page-col.home.wide { padding-left: 18px; padding-right: 18px; }
+}

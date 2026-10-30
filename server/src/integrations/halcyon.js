@@ -4,7 +4,7 @@ import https from 'node:https';
 import tls from 'node:tls';
 import { one, q, now } from '../db/index.js';
 import { encrypt, decrypt } from '../util/crypto.js';
-import { fail, str } from '../util/http.js';
+import { fail, str, isUuid } from '../util/http.js';
 import { logger } from '../util/log.js';
 
 const log = logger('halcyon');
@@ -68,9 +68,9 @@ async function need(userId) {
 }
 
 // Results in one shape for the link picker: { kind, ref, title, subtitle, date, meta }.
-const mailOut = (m) => ({ kind: 'email', ref: String(m.id), title: m.subject || '(no subject)', subtitle: m.from, date: m.date, meta: { from: m.from, date: m.date, summary: m.summary || '' } });
-const eventOut = (e) => ({ kind: 'event', ref: String(e.id), title: e.title || '(no title)', subtitle: [e.local_start || e.start, e.location].filter(Boolean).join(' · '), date: e.start, meta: { start: e.start, end: e.end, allDay: e.all_day, location: e.location, attendees: e.attendees || [] } });
-const taskOut = (t) => ({ kind: 'task', ref: String(t.id), title: t.title, subtitle: t.due ? `due ${t.due.slice(0, 10)}` : (t.done ? 'done' : ''), date: t.due, meta: { due: t.due, done: t.done } });
+const mailOut = (m) => ({ kind: 'email', ref: String(m.id), title: m.subject || '(no subject)', subtitle: m.from, date: m.date, meta: { from: m.from, date: m.date, summary: m.summary || '', hspace: m.space || '' } });
+const eventOut = (e) => ({ kind: 'event', ref: String(e.id), title: e.title || '(no title)', subtitle: [e.local_start || e.start, e.location].filter(Boolean).join(' · '), date: e.start, meta: { start: e.start, end: e.end, allDay: e.all_day, location: e.location, attendees: e.attendees || [], hspace: e.space || '' } });
+const taskOut = (t) => ({ kind: 'task', ref: String(t.id), title: t.title, subtitle: t.due ? `due ${t.due.slice(0, 10)}` : (t.done ? 'done' : ''), date: t.due, meta: { due: t.due, done: t.done, hspace: t.space || '' } });
 const contactOut = (c) => ({ kind: 'contact', ref: String(c.id ?? c.email ?? c.name), title: c.name || c.email, subtitle: [c.email || c.emails?.[0], c.organization || c.company].filter(Boolean).join(' · '), meta: { email: c.email || c.emails?.[0] || '' } });
 
 export async function searchHalcyon(userId, kind, query) {
@@ -93,11 +93,27 @@ export async function searchHalcyon(userId, kind, query) {
 }
 
 /** Today's (or a day's) meetings, for "New meeting note". */
-export async function eventsOn(userId, date) {
+export async function eventsOn(userId, date, space = '') {
   const conn = await need(userId);
   const d = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? new Date(`${date}T00:00:00`) : new Date(new Date().toDateString());
   const to = new Date(d.getTime() + 864e5);
-  return (await call(conn, 'list_events', { from: d.toISOString(), to: to.toISOString() }) || []).map(eventOut).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  return (await call(conn, 'list_events', { from: d.toISOString(), to: to.toISOString(), ...spaceArg(space) }) || []).map(eventOut).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+const spaceArg = (space) => (space ? { space } : {});
+async function spaceNames(conn) {
+  try { const r = await call(conn, 'list_spaces', {}); return Array.isArray(r?.spaces) ? r.spaces : []; } catch { return []; }
+}
+
+/** The Halcyon space of an Inkwell space: the one chosen in its settings, else the one with the same name, else ''. */
+export async function labelFor(userId, spaceId) {
+  if (!isUuid(spaceId)) return '';
+  const s = await one('SELECT name, settings_json FROM spaces WHERE id = $1', spaceId);
+  if (!s) return '';
+  if (s.settings_json?.halcyonSpace != null) return s.settings_json.halcyonSpace;
+  const conn = await connection(userId);
+  if (!conn) return '';
+  return (await spaceNames(conn)).find((n) => n.toLowerCase() === s.name.toLowerCase()) || '';
 }
 
 export const openUrl = (conn, link) => {
@@ -137,13 +153,18 @@ export default async function halcyonRoutes(app) {
   });
 
   app.get('/api/halcyon/search', async (req) => searchHalcyon(req.user.id, req.query.kind, req.query.q));
-  app.get('/api/halcyon/events', async (req) => eventsOn(req.user.id, req.query.date));
+  // Halcyon's space names; older Halcyon versions do not offer the tool.
+  app.get('/api/halcyon/spaces', async (req) => {
+    const conn = await connection(req.user.id);
+    return conn ? spaceNames(conn) : [];
+  });
+  app.get('/api/halcyon/events', async (req) => eventsOn(req.user.id, req.query.date, await labelFor(req.user.id, req.query.space)));
   // Today dashboard: open tasks (overdue and due soon first) and e-mails waiting for a reply or an action.
   app.get('/api/halcyon/tasks', async (req) => {
-    const tasks = (await call(await need(req.user.id), 'list_tasks', { include_done: false }) || []).map(taskOut);
+    const tasks = (await call(await need(req.user.id), 'list_tasks', { include_done: false, ...spaceArg(await labelFor(req.user.id, req.query.space)) }) || []).map(taskOut);
     return tasks.sort((a, b) => (a.date ? Date.parse(a.date) : Infinity) - (b.date ? Date.parse(b.date) : Infinity)).slice(0, 30);
   });
-  app.get('/api/halcyon/open-items', async (req) => (await call(await need(req.user.id), 'list_open_items', { kind: 'both', limit: 20 }) || [])
+  app.get('/api/halcyon/open-items', async (req) => (await call(await need(req.user.id), 'list_open_items', { kind: 'both', limit: 20, ...spaceArg(await labelFor(req.user.id, req.query.space)) }) || [])
     .map((m) => ({ ...mailOut(m), meta: { ...mailOut(m).meta, action: m.action || null, needsReply: !!m.needs_reply } })));
   app.get('/api/halcyon/message/:id', async (req) => call(await need(req.user.id), 'get_message', { id: Number(req.params.id) || 0 }));
 

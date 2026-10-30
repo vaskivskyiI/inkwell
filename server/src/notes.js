@@ -111,6 +111,15 @@ export default async function noteRoutes(app) {
   app.post('/api/notes', async (req) => {
     const b = req.body || {};
     await needSpace(req.user.id, b.spaceId, 'editor');
+    // Quick photo: a page that starts with the picture ready to draw on.
+    if (b.photo?.assetId && isUuid(b.photo.assetId)) {
+      const a = await one('SELECT id FROM assets WHERE id = $1 AND space_id = $2', b.photo.assetId, b.spaceId) || fail(404, 'Photo not found');
+      const height = Math.min(4000, Math.max(80, Math.round(Number(b.photo.height) || 700)));
+      const n = await createNote(req.user.id, { spaceId: b.spaceId, title: str(b.title, 300), icon: '📷',
+        blocks: [{ type: 'inkBlock', attrs: { id: randomToken(8), height, bg: `/api/assets/${a.id}` } }, { type: 'paragraph' }] });
+      await q('UPDATE assets SET note_id = $2 WHERE id = $1', a.id, n.id);
+      return noteOut(n);
+    }
     const t = b.template && TEMPLATES[b.template];
     const n = await createNote(req.user.id, {
       spaceId: b.spaceId, parentId: isUuid(b.parentId) ? b.parentId : null, afterId: b.afterId === null || isUuid(b.afterId) ? b.afterId : undefined,

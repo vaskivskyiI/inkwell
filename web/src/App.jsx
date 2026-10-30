@@ -6,9 +6,10 @@ import { loadSpaces, loadTree, loadFavorites, connectEvents, switchSpace } from 
 import { setUnauthorizedHandler } from './api.js';
 import { Sidebar, newPage, openToday } from './Sidebar.jsx';
 import { NoteView } from './NoteView.jsx';
-import { HomePage, SearchPage, TrashPage, AskPage, NewFromItem } from './Pages.jsx';
+import { HomePage, SearchPage, TrashPage, AskPage, NewFromItem, SmartPage } from './Pages.jsx';
 import { SettingsPage } from './Settings.jsx';
 import { Palette } from './Palette.jsx';
+import { Rail } from './Rail.jsx';
 import { AuthPage } from './Auth.jsx';
 
 async function boot() {
@@ -17,11 +18,12 @@ async function boot() {
   if (!st.user) return;
   const [spaces, settings, halcyon] = await Promise.all([loadSpaces(), get('/api/settings'), get('/api/integrations/halcyon').catch(() => ({ connected: false }))]);
   store.set({ settings, halcyon });
-  await loadTree(store.get().spaceId || spaces[0]?.id);
+  const first = store.get().spaceId;
+  await loadTree(first === 'all' ? spaces[0]?.id : first || spaces[0]?.id);
   loadFavorites().catch(() => {});
   connectEvents();
   // Other spaces' trees load in the background (page links and the palette search across them).
-  for (const s of spaces) if (s.id !== store.get().spaceId) loadTree(s.id).catch(() => {});
+  for (const s of spaces) if (!store.get().trees[s.id]) loadTree(s.id).catch(() => {});
 }
 
 export function App() {
@@ -58,7 +60,7 @@ export function App() {
   useEffect(() => {
     if (route.name !== 'n') return;
     const n = Object.entries(store.get().trees).find(([, list]) => list.some((x) => x.id === route.id));
-    if (n && n[0] !== spaceId) switchSpace(n[0]);
+    if (n && spaceId !== 'all' && n[0] !== spaceId) switchSpace(n[0]);
   }, [route.name, route.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (err) return <div className="empty-state"><h2>Inkwell cannot reach its server</h2><p>{err.message}</p><button onClick={() => location.reload()}>Try again</button></div>;
@@ -72,10 +74,12 @@ export function App() {
   else if (route.name === 'search') main = <div className="scroll"><SearchPage q={route.query.q} /></div>;
   else if (route.name === 'ask') main = <div className="scroll"><AskPage /></div>;
   else if (route.name === 'new') main = <NewFromItem query={route.query} />;
+  else if (route.name === 'smart') main = <div className="scroll"><SmartPage cat={route.id} sub={route.query.sub} /></div>;
   else main = <div className="scroll"><HomePage /></div>;
 
   return (
     <div className={`app${sidebar ? '' : ' no-sidebar'}`}>
+      <Rail />
       {sidebar && <Sidebar />}
       {sidebar && <div className="scrim" onClick={() => store.set({ sidebar: false })} />}
       <main className="main">

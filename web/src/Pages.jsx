@@ -1,8 +1,8 @@
 // Home, search results, trash and the full-page assistant.
-import { useEffect, useState } from 'react';
-import { FilePlus2, PenLine, CalendarDays, RotateCcw, Trash2, Search as SearchIcon, CheckSquare, Mail, ExternalLink, NotebookText } from 'lucide-react';
-import { get, post, del } from './api.js';
-import { useStore, openNote, toast, toastError, currentSpace } from './store.js';
+import { useEffect, useRef, useState } from 'react';
+import { FilePlus2, PenLine, CalendarDays, RotateCcw, Trash2, Search as SearchIcon, CheckSquare, Mail, ExternalLink, NotebookText, MoveHorizontal, Camera } from 'lucide-react';
+import { get, post, del, upload } from './api.js';
+import { useStore, openNote, toast, toastError, currentSpace, filterSpace, localGet, localSet } from './store.js';
 import { newPage, openToday } from './Sidebar.jsx';
 import { AskTab } from './RightPanel.jsx';
 import { highlight } from './Palette.jsx';
@@ -16,17 +16,22 @@ export function HomePage() {
   const halcyon = useStore((s) => s.halcyon);
   const route = useStore((s) => s.route);
   const [recent, setRecent] = useState(null);
-  useEffect(() => { get('/api/recent?limit=12').then(setRecent).catch(toastError); }, [spaceId]);
+  useEffect(() => { const sp = filterSpace(); get(`/api/recent?limit=12${sp ? `&space=${sp}` : ''}`).then(setRecent).catch(toastError); }, [spaceId]);
+  const [wide, setWide] = useState(localGet('homeWide') === '1');
   return (
-    <div className="page-col home">
-      <h1>{greeting()}, {user?.name?.split(' ')[0]}</h1>
+    <div className={`page-col home${wide ? ' wide' : ''}`}>
+      <div className="home-head">
+        <h1>{greeting()}, {user?.name?.split(' ')[0]}</h1>
+        <button className="icon desk-only" title={wide ? 'Fixed width' : 'Use the whole width'} aria-label={wide ? 'Fixed width' : 'Use the whole width'} onClick={() => { setWide(!wide); localSet('homeWide', wide ? '0' : '1'); }}><MoveHorizontal size={18} /></button>
+      </div>
+      <QuickNote />
       <div className="quick">
         <button onClick={() => newPage()}><FilePlus2 size={18} /> New page</button>
         <button onClick={() => newPage({ kind: 'journal' })}><PenLine size={18} /> New journal</button>
         <button onClick={openToday}><PenLine size={18} /> Today's journal</button>
         <button onClick={() => newPage({ template: 'meeting' })}><CalendarDays size={18} /> Meeting notes</button>
       </div>
-      {halcyon?.connected && <Today highlight={!!route.query.meetings} />}
+      {halcyon?.connected && <Today key={spaceId} highlight={!!route.query.meetings} />}
       <section>
         <h3>Recently edited</h3>
         {recent === null ? <span className="spinner" /> : !recent.length ? <p className="muted">Nothing yet — start with a page or a journal.</p> : (
@@ -51,6 +56,58 @@ export async function noteForItem(kind, ref, title, meta = {}) {
   const n = await post('/api/notes/from-item', { kind, ref: String(ref), title, meta, spaceId: currentSpace()?.id });
   if (n.existing) toast('Opened the existing note');
   return n;
+}
+
+const localDay = (d) => d.toLocaleDateString('sv-SE');
+
+// Capture without deciding where: one line becomes a page, a photo a page to draw on (the camera on phones).
+function QuickNote() {
+  const [text, setText] = useState('');
+  const photo = useRef(null);
+  const add = async () => {
+    const t = text.trim();
+    if (!t) return;
+    setText('');
+    try { openNote((await post('/api/notes', { spaceId: currentSpace().id, title: t.split(/[.!?\n]/)[0].slice(0, 80), markdown: t })).id); } catch (e) { toastError(e); }
+  };
+  const addPhoto = async (file) => {
+    try {
+      const url = URL.createObjectURL(file);
+      const size = await new Promise((res) => { const i = new window.Image(); i.onload = () => res({ w: i.naturalWidth, h: i.naturalHeight }); i.onerror = () => res({ w: 4, h: 3 }); i.src = url; });
+      URL.revokeObjectURL(url);
+      const spaceId = currentSpace().id;
+      const a = await upload(file, { spaceId });
+      openNote((await post('/api/notes', { spaceId, title: `Photo ${localDay(new Date())}`, photo: { assetId: a.id, height: (1000 * size.h) / size.w } })).id);
+    } catch (e) { toastError(e); }
+  };
+  return (
+    <div className="quick-note">
+      <input type="text" value={text} placeholder="Quick note — press Enter" aria-label="Quick note" onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
+      <button title="Take or choose a photo and draw on it" onClick={() => photo.current?.click()}><Camera size={16} /> Photo</button>
+      <input ref={photo} type="file" hidden accept="image/*" capture="environment" onChange={(e) => { const f = e.target.files[0]; if (f) addPhoto(f); e.target.value = ''; }} />
+    </div>
+  );
+}
+
+// A smart category: all notes of meetings, tasks, e-mails… and of one recurring meeting.
+export function SmartPage({ cat, sub }) {
+  const spaceId = useStore((s) => s.spaceId);
+  const [groups, setGroups] = useState(null);
+  useEffect(() => { const sp = filterSpace(); get(`/api/smart${sp ? `?space=${sp}` : ''}`).then(setGroups).catch(toastError); }, [spaceId]);
+  if (!groups) return <div className="note-loading"><span className="spinner" /></div>;
+  const g = groups.find((x) => x.id === cat);
+  if (!g) return <div className="page-col"><h1>Nothing here yet</h1><p className="muted">Notes appear here when they are linked to meetings, tasks or e-mails.</p></div>;
+  const s = sub && g.subs.find((x) => x.id === sub);
+  const notes = s ? s.notes : [...g.subs.flatMap((x) => x.notes), ...g.notes].sort((a, b) => b.createdAt - a.createdAt);
+  return (
+    <div className="page-col home wide">
+      <h1>{s ? s.label : g.label}</h1>
+      {!s && g.subs.length > 0 && <div className="chips" style={{ marginBottom: 18 }}>{g.subs.map((x) => <a key={x.id} className="chip" href={`#/smart/${g.id}?sub=${encodeURIComponent(x.id)}`}>{x.label} · {x.count}</a>)}</div>}
+      <div className="cards">
+        {notes.map((n) => <a key={n.id} className="card" href={`#/n/${n.id}`}><div className="card-title"><span>{n.icon || '📄'}</span> {n.title || 'Untitled'}</div><div className="card-snippet" /><div className="muted small">{when(n.createdAt)}</div></a>)}
+      </div>
+    </div>
+  );
 }
 
 export function NewFromItem({ query }) {
@@ -85,12 +142,15 @@ function Today({ highlight }) {
       setData((d) => ({ ...d, [key]: items }));
       if (items.length) {
         const found = await get(`/api/links/lookup?kind=${kind}&ref=${items.map((i) => encodeURIComponent(i.ref)).join(',')}`).catch(() => []);
-        setNotes((n) => ({ ...n, ...Object.fromEntries(found.map((f) => [`${kind}:${f.ref}`, f.id])) }));
+        // Repeating meetings have one note per day: only today's counts as this event's note.
+        const today = localDay(new Date());
+        setNotes((n) => ({ ...n, ...Object.fromEntries(found.filter((f) => kind !== 'event' || f.date === today).map((f) => [`${kind}:${f.ref}`, f.id])) }));
       }
     };
-    load('events', '/api/halcyon/events', 'event');
-    load('tasks', '/api/halcyon/tasks', 'task');
-    load('mail', '/api/halcyon/open-items', 'email');
+    const sp = filterSpace() ? `?space=${filterSpace()}` : '';
+    load('events', `/api/halcyon/events${sp}`, 'event');
+    load('tasks', `/api/halcyon/tasks${sp}`, 'task');
+    load('mail', `/api/halcyon/open-items${sp}`, 'email');
   }, []);
   const open = async (it) => {
     const id = notes[`${it.kind}:${it.ref}`];

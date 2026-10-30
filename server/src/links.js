@@ -6,6 +6,7 @@ import { needNote, needSpace, userSpaceIds } from './spaces.js';
 import { publish } from './events.js';
 import { connection, openUrl, eventsOn, call } from './integrations/halcyon.js';
 import { createNote, noteOut } from './notes.js';
+import { docFrom, extract, markdownToBlocks } from './docmodel.js';
 import { TEMPLATES } from './templates.js';
 import { config } from './config.js';
 
@@ -24,6 +25,82 @@ export async function addLink(userId, noteId, { kind, ref, title, meta }) {
     ON CONFLICT (note_id, kind, ref) DO UPDATE SET title = EXCLUDED.title, meta_json = EXCLUDED.meta_json RETURNING *`,
   noteId, kind, ref, str(title, 300), JSON.stringify(meta && typeof meta === 'object' ? meta : {}), userId, now());
   return l;
+}
+
+const dateOf = (d) => (d ? localStamp(d).slice(0, 10) : null);
+
+/** The user's writable space for a Halcyon space label (explicit association, else the same name), or null. */
+async function spaceForLabel(userId, label) {
+  if (!label) return null;
+  const rows = await many(`SELECT s.id, s.name, s.settings_json FROM spaces s JOIN space_members m ON m.space_id = s.id AND m.user_id = $1
+    WHERE m.role IN ('owner', 'editor') ORDER BY m.position`, userId);
+  const l = String(label).toLowerCase();
+  return (rows.find((s) => String(s.settings_json?.halcyonSpace ?? '').toLowerCase() === l)
+    || rows.find((s) => s.settings_json?.halcyonSpace == null && s.name.toLowerCase() === l))?.id || null;
+}
+
+/**
+ * The note for a Halcyon item: the existing one when there is one (for events, per occurrence: same event and day),
+ * otherwise a new note linked to the item. Meeting notes carry the date in the title and pick up the open to-dos of
+ * the previous note of the same meeting.
+ */
+export async function noteFromItem(userId, b) {
+  const kind = ['event', 'email', 'task'].includes(b.kind) ? b.kind : fail(400, 'kind must be event, email or task');
+  const ref = str(b.ref, 200) || fail(400, 'Missing ref');
+  const meta = { ...(b.meta && typeof b.meta === 'object' ? b.meta : {}) };
+  const spaces = await userSpaceIds(userId);
+  const linked = await many(`SELECT n.*, l.meta_json AS link_meta FROM note_links l JOIN notes n ON n.id = l.note_id
+    WHERE l.kind = $1 AND l.ref = $2 AND n.space_id = ANY($3::uuid[]) AND n.deleted_at IS NULL ORDER BY n.created_at DESC`, kind, ref, spaces);
+  const same = kind === 'event' && meta.start ? linked.find((n) => dateOf(n.link_meta?.start) === dateOf(meta.start)) : linked[0];
+  if (same) return { ...noteOut(same), existing: true };
+
+  const writable = async (id) => isUuid(id) && spaces.includes(id) && !!(await one("SELECT 1 FROM space_members WHERE space_id = $1 AND user_id = $2 AND role IN ('owner', 'editor')", id, userId));
+  // The item's own Halcyon space decides first; then earlier notes of this meeting; then the space the user is in;
+  // then their first writable one.
+  const spaceId = (await spaceForLabel(userId, meta.hspace)) || ((await writable(linked[0]?.space_id)) ? linked[0].space_id : null)
+    || ((await writable(b.spaceId)) ? b.spaceId : null)
+    || (await one("SELECT space_id FROM space_members WHERE user_id = $1 AND role IN ('owner', 'editor') ORDER BY position LIMIT 1", userId))?.space_id
+    || fail(403, 'No space you can write in');
+
+  let title = str(b.title, 300);
+  const conn = await connection(userId);
+  if (conn && kind === 'email' && (!title || !meta.from)) {
+    try {
+      const m = await call(conn, 'get_message', { id: Number(ref) });
+      title ||= m.subject || '';
+      Object.assign(meta, { from: meta.from || m.from, date: meta.date || m.date, summary: m.summary || '' });
+    } catch { /* note without details */ }
+  }
+  const stamp = (d) => (d ? localStamp(d) : localStamp(Date.now()).slice(0, 10));
+  const attendees = Array.isArray(meta.attendees) ? meta.attendees : String(meta.attendees || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const extra = [];
+  let md, icon, noteTitle = title;
+  if (kind === 'event') {
+    icon = '🗓️';
+    meta.attendees = attendees;
+    noteTitle = `${title || 'Meeting'} ${dateOf(meta.start || Date.now())}`;
+    md = TEMPLATES.meeting.md.replace('{{date}}', stamp(meta.start))
+      .replace('**Attendees:** ', `${meta.location ? `**Where:** ${meta.location}  \n` : ''}**Attendees:** ${attendees.join(', ')}`);
+    const prev = title ? await one(`SELECT n.id, n.title, n.ydoc FROM note_links l JOIN notes n ON n.id = l.note_id
+      WHERE l.kind = 'event' AND (l.ref = $1 OR lower(l.title) = lower($2)) AND n.space_id = ANY($3::uuid[]) AND n.deleted_at IS NULL ORDER BY n.created_at DESC LIMIT 1`, ref, title, spaces) : null;
+    if (prev) {
+      const open = [...extract(docFrom(prev.ydoc)).markdown.matchAll(/^\s*- \[ \] (.*\S.*)$/gm)].map((m) => m[1].trim()).slice(0, 30);
+      extra.push({ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'From last time' }] },
+        { type: 'paragraph', content: [{ type: 'pageMention', attrs: { id: prev.id, title: prev.title } }] });
+      if (open.length) extra.push(...markdownToBlocks(open.map((t) => `- [ ] ${t}`).join('\n')));
+      meta.previous = prev.id;
+    }
+  } else if (kind === 'email') {
+    icon = '✉️';
+    md = `${meta.from ? `**From:** ${meta.from}  \n` : ''}**Date:** ${stamp(meta.date)}\n\n${meta.summary ? `> ${meta.summary}\n\n` : ''}## Notes\n\n\n## Follow-ups\n- [ ] `;
+  } else {
+    icon = '☑️';
+    md = `${meta.due ? `**Due:** ${stamp(meta.due).slice(0, 10)}\n\n` : ''}## Notes\n\n\n## Steps\n- [ ] `;
+  }
+  const n = await createNote(userId, { spaceId, parentId: isUuid(b.parentId) ? b.parentId : null, title: noteTitle || (kind === 'email' ? 'E-mail notes' : 'Task notes'), icon, blocks: [...markdownToBlocks(md), ...extra] });
+  await addLink(userId, n.id, { kind, ref, title, meta });
+  if (meta.previous) await addLink(userId, n.id, { kind: 'note', ref: meta.previous, title: 'Previous meeting' });
+  return noteOut(n);
 }
 
 export default async function linkRoutes(app) {
@@ -84,70 +161,52 @@ export default async function linkRoutes(app) {
     const refs = String(req.query.ref || '').split(',').map((r) => r.trim()).filter(Boolean).slice(0, 100);
     if (!refs.length) return [];
     const base = config.publicUrl;
-    return (await many(`SELECT l.ref, n.id, n.title, n.icon, n.kind, n.updated_at, left(n.text_content, 200) AS snippet FROM note_links l JOIN notes n ON n.id = l.note_id
+    return (await many(`SELECT l.ref, l.meta_json, n.id, n.title, n.icon, n.kind, n.updated_at, left(n.text_content, 200) AS snippet FROM note_links l JOIN notes n ON n.id = l.note_id
       WHERE l.kind = $1 AND l.ref = ANY($2::text[]) AND n.deleted_at IS NULL AND n.space_id = ANY($3::uuid[]) ORDER BY n.updated_at DESC`, kind, refs, await userSpaceIds(req.user.id)))
-      .map((r) => ({ ref: r.ref, id: r.id, title: r.title, icon: r.icon, kind: r.kind, updatedAt: r.updated_at, snippet: r.snippet, url: `${base}/#/n/${r.id}` }));
+      .map((r) => ({ ref: r.ref, id: r.id, title: r.title, icon: r.icon, kind: r.kind, updatedAt: r.updated_at, snippet: r.snippet, url: `${base}/#/n/${r.id}`, date: dateOf(r.meta_json?.start) }));
   });
 
-  // "New meeting note": a page from a Halcyon event, linked to it, with attendees filled in.
+  // "New meeting note" from a Halcyon event object (older clients; the app uses from-item).
   app.post('/api/notes/meeting', async (req) => {
     const b = req.body || {};
     await needSpace(req.user.id, b.spaceId, 'editor');
     let ev = b.event;
     if (!ev && b.eventId) ev = (await eventsOn(req.user.id, b.date)).find((e) => e.ref === String(b.eventId));
     if (!ev) fail(404, 'Event not found');
-    const existing = await one(`SELECT n.* FROM note_links l JOIN notes n ON n.id = l.note_id WHERE l.kind = 'event' AND l.ref = $1 AND n.space_id = $2 AND n.deleted_at IS NULL LIMIT 1`, String(ev.ref), b.spaceId);
-    if (existing && !b.force) return { ...noteOut(existing), existing: true };
-    const start = ev.meta?.start ? new Date(ev.meta.start) : new Date();
-    const md = TEMPLATES.meeting.md.replace('{{date}}', localStamp(start))
-      .replace('**Attendees:** ', `${ev.meta?.location ? `**Where:** ${ev.meta.location}  \n` : ''}**Attendees:** ${(ev.meta?.attendees || []).join(', ')}`);
-    const n = await createNote(req.user.id, { spaceId: b.spaceId, parentId: isUuid(b.parentId) ? b.parentId : null, title: ev.title, icon: '🗓️', markdown: md });
-    await addLink(req.user.id, n.id, { kind: 'event', ref: ev.ref, title: ev.title, meta: ev.meta });
-    return noteOut(n);
+    return noteFromItem(req.user.id, { kind: 'event', ref: ev.ref, title: ev.title, meta: ev.meta, spaceId: b.spaceId, parentId: b.parentId });
   });
 
-  // A note for any Halcyon item (deep link `#/new?kind=…&ref=…` from Halcyon, or "Take notes" in Inkwell): the
-  // existing linked note when there is one in the user's spaces, otherwise a new one linked to the item.
-  app.post('/api/notes/from-item', async (req) => {
-    const b = req.body || {};
-    const kind = ['event', 'email', 'task'].includes(b.kind) ? b.kind : fail(400, 'kind must be event, email or task');
-    const ref = str(b.ref, 200) || fail(400, 'Missing ref');
-    const spaces = await userSpaceIds(req.user.id);
-    const existing = await one(`SELECT n.* FROM note_links l JOIN notes n ON n.id = l.note_id
-      WHERE l.kind = $1 AND l.ref = $2 AND n.space_id = ANY($3::uuid[]) AND n.deleted_at IS NULL ORDER BY n.updated_at DESC LIMIT 1`, kind, ref, spaces);
-    if (existing) return { ...noteOut(existing), existing: true };
-    let spaceId = isUuid(b.spaceId) && spaces.includes(b.spaceId) ? b.spaceId : null;
-    if (spaceId && !(await one("SELECT 1 FROM space_members WHERE space_id = $1 AND user_id = $2 AND role IN ('owner', 'editor')", spaceId, req.user.id))) spaceId = null;
-    spaceId ||= (await one("SELECT space_id FROM space_members WHERE user_id = $1 AND role IN ('owner', 'editor') ORDER BY position LIMIT 1", req.user.id))?.space_id || fail(403, 'No space you can write in');
-    const meta = { ...(b.meta && typeof b.meta === 'object' ? b.meta : {}) };
-    let title = str(b.title, 300);
-    // Fill in what the link did not carry when Halcyon is connected here.
-    const conn = await connection(req.user.id);
-    if (conn && kind === 'email' && (!title || !meta.from)) {
-      try {
-        const m = await call(conn, 'get_message', { id: Number(ref) });
-        title ||= m.subject || '';
-        Object.assign(meta, { from: meta.from || m.from, date: meta.date || m.date, summary: m.summary || '' });
-      } catch { /* note without details */ }
-    }
-    const day = (d) => (d ? localStamp(d) : localStamp(Date.now()).slice(0, 10));
-    const attendees = Array.isArray(meta.attendees) ? meta.attendees : String(meta.attendees || '').split(',').map((s) => s.trim()).filter(Boolean);
-    let md, icon;
-    if (kind === 'event') {
-      icon = '🗓️';
-      md = TEMPLATES.meeting.md.replace('{{date}}', day(meta.start))
-        .replace('**Attendees:** ', `${meta.location ? `**Where:** ${meta.location}  \n` : ''}**Attendees:** ${attendees.join(', ')}`);
-      meta.attendees = attendees;
-    } else if (kind === 'email') {
-      icon = '✉️';
-      md = `${meta.from ? `**From:** ${meta.from}  \n` : ''}**Date:** ${day(meta.date)}\n\n${meta.summary ? `> ${meta.summary}\n\n` : ''}## Notes\n\n\n## Follow-ups\n- [ ] `;
-    } else {
-      icon = '☑️';
-      md = `${meta.due ? `**Due:** ${day(meta.due).slice(0, 10)}\n\n` : ''}## Notes\n\n\n## Steps\n- [ ] `;
-    }
-    const n = await createNote(req.user.id, { spaceId, title: title || (kind === 'email' ? 'E-mail notes' : kind === 'task' ? 'Task notes' : 'Meeting notes'), icon, markdown: md });
-    await addLink(req.user.id, n.id, { kind, ref, title: title || '', meta });
-    return noteOut(n);
+  // A note for any Halcyon item (deep link `#/new?kind=…&ref=…` from Halcyon, or "Note" on Home).
+  app.post('/api/notes/from-item', async (req) => noteFromItem(req.user.id, req.body || {}));
+
+  // Smart categories: notes grouped by what they are about, whatever their place in the tree. Meetings that recur
+  // (same event name) and senders with several notes get their own sub-category.
+  app.get('/api/smart', async (req) => {
+    let spaces = await userSpaceIds(req.user.id);
+    if (isUuid(req.query.space)) spaces = spaces.filter((s) => s === req.query.space);
+    const rows = await many(`SELECT n.id, n.title, n.icon, n.kind, n.space_id, n.updated_at, n.created_at, l.kind AS lk, l.title AS lt, l.meta_json
+      FROM notes n LEFT JOIN note_links l ON l.note_id = n.id AND l.kind IN ('event', 'email', 'task')
+      WHERE n.space_id = ANY($1::uuid[]) AND n.deleted_at IS NULL AND (l.id IS NOT NULL OR n.kind = 'journal')
+      ORDER BY n.created_at DESC LIMIT 3000`, spaces);
+    const card = (r) => ({ id: r.id, title: r.title, icon: r.icon, kind: r.kind, spaceId: r.space_id, updatedAt: r.updated_at, createdAt: r.created_at });
+    const group = (id, label, list, keyOf, min) => {
+      const by = new Map();
+      for (const r of list) { const k = keyOf?.(r); if (k) { if (!by.has(k.toLowerCase())) by.set(k.toLowerCase(), { label: k, rows: [] }); by.get(k.toLowerCase()).rows.push(r); } }
+      const subs = [...by.values()].filter((s) => s.rows.length >= min);
+      const inSub = new Set(subs.flatMap((s) => s.rows.map((r) => r.id)));
+      return { id, label, count: new Set(list.map((r) => r.id)).size,
+        subs: subs.sort((a, b) => b.rows.length - a.rows.length).map((s) => ({ id: s.label.toLowerCase(), label: s.label, count: s.rows.length, notes: s.rows.map(card) })),
+        notes: list.filter((r) => !inSub.has(r.id)).map(card) };
+    };
+    const of = (k) => rows.filter((r) => r.lk === k);
+    const person = (r) => String(r.meta_json?.from || '').replace(/<.*>/, '').trim();
+    const seen = new Set();
+    return [
+      group('meetings', 'Meetings', of('event'), (r) => r.lt, 2),
+      group('tasks', 'Tasks', of('task')),
+      group('emails', 'E-mails', of('email'), person, 2),
+      group('journals', 'Handwritten', rows.filter((r) => r.kind === 'journal' && !seen.has(r.id) && seen.add(r.id))),
+    ].filter((g) => g.count);
   });
 
   // Action items (from the AI summary or chosen in the page) → Halcyon tasks, linked back to the page.

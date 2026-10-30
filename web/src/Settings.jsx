@@ -68,6 +68,9 @@ function Profile() {
 
 function Spaces() {
   const spaces = useStore((s) => s.spaces);
+  const halcyon = useStore((s) => s.halcyon);
+  const [hspaces, setHspaces] = useState([]);
+  useEffect(() => { if (halcyon?.connected) get('/api/halcyon/spaces').then(setHspaces).catch(() => {}); }, [halcyon?.connected]);
   const route = useStore((s) => s.route);
   const [sel, setSel] = useState(route.query.space || spaces[0]?.id);
   const space = spaces.find((s) => s.id === sel) || spaces[0];
@@ -100,6 +103,15 @@ function Spaces() {
             Only local AI for this space <span className="hint">— pages here are never sent to cloud AI providers (Ollama / LAN servers only).</span></label>
           <label className="check"><input type="checkbox" checked={space.settings?.aiEnabled !== false} onChange={(e) => patch(`/api/spaces/${space.id}`, { settings: { aiEnabled: e.target.checked } }).then(loadSpaces).catch(toastError)} /> AI features in this space</label>
         </>
+      )}
+      {owner && halcyon?.connected && (
+        <Field label="Halcyon space" hint="Today on the home page shows this space's meetings, tasks and e-mails from Halcyon, and notes from Halcyon land here. Automatic: the Halcyon space with the same name.">
+          <select value={space.settings?.halcyonSpace ?? '__auto'} onChange={(e) => patch(`/api/spaces/${space.id}`, { settings: { halcyonSpace: e.target.value === '__auto' ? null : e.target.value } }).then(loadSpaces).catch(toastError)}>
+            <option value="__auto">Automatic (same name)</option>
+            <option value="">None</option>
+            {[...new Set([...hspaces, space.settings?.halcyonSpace].filter(Boolean))].map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </Field>
       )}
       <h3>People</h3>
       <table className="members">

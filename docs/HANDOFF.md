@@ -15,7 +15,7 @@ MCP endpoint (no Halcyon changes needed for the Inkwell → Halcyon direction).
 
 ## 2. State
 - 3 commits. Server + web UI implement everything in docs/PLAN.md §2 except the roadmap items.
-- Tests: `npm test` 48/48 (incl. AFFiNE snapshot and Markdown-zip import) (unit, API, real-WebSocket collaboration, AI with mock provider, fake Halcyon MCP).
+- Tests: `npm test` 50/50 (incl. AFFiNE snapshot and Markdown-zip import) (unit, API, real-WebSocket collaboration, AI with mock provider, fake Halcyon MCP).
   `npm run test:pg -w server`: API 12/12 + AI 7/7 through the production `pg` driver (PGlite wire server).
 - UI checked in the desktop app's browser: sign-up, home, editor (collab load, slash menu, ink block, drawing),
   background handwriting recognition shown under the ink, AI panel (summary, tags, action items, handwriting),
@@ -68,3 +68,12 @@ MCP endpoint (no Halcyon changes needed for the Inkwell → Halcyon direction).
 - Hocuspocus 4 takes a Fetch `Request`; bridge from `@fastify/websocket` in `collab.handleSocket`.
 - Markdown parsers must always make progress (a `| foo` or `- [ ] ` line used to loop forever).
 - Halcyon behind a private CA: Settings → Integrations takes its CA (PEM, pasted or from a .pem/.crt/.cer file) or "do not check", kept in `integrations.settings_json.tls`; MCP calls then use `node:https` with that CA added to Node's roots (`integrations/halcyon.js` postJson). Test certificates: `server/test/fixtures/tls`.
+
+### 2026-10-30: spaces, categories, look
+- "All spaces" (`store.spaceId === 'all'`): tree per space, Home and search across all; new pages go to the first writable space.
+- Halcyon spaces: `spaces.settings_json.halcyonSpace` (null/absent = same name, '' = none, else the label). Needs Halcyon's MCP
+  `list_spaces`, the `space` argument and the `space` field on items (Halcyon 5e76125 or later); older Halcyon simply shows everything.
+- Event notes are per occurrence: same ref + same local day = same note; `lookup` rows carry `date`. New notes of a meeting stay
+  in the space of earlier ones and carry over open to-dos ("From last time").
+- `GET /api/smart`: Meetings / Tasks / E-mails / Handwritten, derived from `note_links`; a sub-category needs 2+ notes.
+- Pen layer anchors are text-based (`web/src/ink/anchor.js`); strokes from before that stay fixed. Changing page width reflows text, not ink.

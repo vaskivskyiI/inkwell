@@ -72,7 +72,7 @@ test('journals and pages nest in both directions', async () => {
 test('a note for a Halcyon item: created once, linked, with the item details', async () => {
   const ev = await ann.post('/api/notes/from-item', { kind: 'event', ref: '77', title: 'Board meeting', spaceId: work(),
     meta: { start: '2026-11-03T09:00:00Z', location: 'Room 2', attendees: 'Ann, Bob' } });
-  assert.equal(ev.title, 'Board meeting');
+  assert.equal(ev.title, 'Board meeting 2026-11-03');
   const md = await ann.get(`/api/notes/${ev.id}/export`);
   assert.match(md, /\*\*Where:\*\* Room 2/);
   assert.match(md, /\*\*Attendees:\*\* Ann, Bob/);
@@ -85,4 +85,37 @@ test('a note for a Halcyon item: created once, linked, with the item details', a
   const task = await ann.post('/api/notes/from-item', { kind: 'task', ref: '9', title: 'Send slides', meta: { due: '2026-11-04' } });
   assert.match(await ann.get(`/api/notes/${task.id}/export`), /\*\*Due:\*\* 2026-11-04/);
   assert.equal(await ann.status('POST', '/api/notes/from-item', { kind: 'calendar', ref: '1' }), 400);
+});
+
+test('recurring meetings: dated titles, one note per day, open to-dos carried over, smart categories', async () => {
+  const a = await ann.post('/api/notes/from-item', { kind: 'event', ref: '500', title: 'Koordinacija vodij', spaceId: work(), meta: { start: '2026-10-06T08:00:00Z' } });
+  assert.match(a.title, /^Koordinacija vodij 2026-10-06$/);
+  await ann.post(`/api/notes/${a.id}/append`, { markdown: '- [ ] Pripravi poročilo\n- [x] Že narejeno' });
+  const b = await ann.post('/api/notes/from-item', { kind: 'event', ref: '500', title: 'Koordinacija vodij', meta: { start: '2026-10-13T08:00:00Z' } });
+  assert.notEqual(b.id, a.id, 'each occurrence has its own note');
+  const again = await ann.post('/api/notes/from-item', { kind: 'event', ref: '500', title: 'Koordinacija vodij', meta: { start: '2026-10-13T09:00:00Z' } });
+  assert.equal(again.id, b.id, 'same day, same note');
+  const md = await ann.get(`/api/notes/${b.id}/export`);
+  assert.match(md, /## From last time[\s\S]*\[\[Koordinacija vodij 2026-10-06\]\][\s\S]*- \[ \] Pripravi poročilo/);
+  assert.doesNotMatch(md, /Že narejeno/);
+  await ann.post('/api/notes/from-item', { kind: 'event', ref: '600', title: 'One-off', spaceId: work(), meta: { start: '2026-10-14T08:00:00Z' } });
+  const smart = await ann.get(`/api/smart?space=${work()}`);
+  const meetings = smart.find((g) => g.id === 'meetings');
+  const sub = meetings.subs.find((s) => s.label === 'Koordinacija vodij');
+  assert.equal(sub.count, 2);
+  assert.deepEqual(new Set(sub.notes.map((n) => n.id)), new Set([a.id, b.id]));
+  assert.ok(meetings.notes.some((n) => n.title.startsWith('One-off')));
+  assert.equal((await ann.get('/api/links/lookup?kind=event&ref=500')).find((r) => r.id === a.id).date, '2026-10-06');
+});
+
+test('a Halcyon space label puts the note in the associated space', async () => {
+  const lab = await ann.post('/api/spaces', { name: 'Lab' });
+  const other = await ann.post('/api/spaces', { name: 'Elsewhere' });
+  await ann.patch(`/api/spaces/${other.id}`, { settings: { halcyonSpace: 'Projekti' } });
+  const byName = await ann.post('/api/notes/from-item', { kind: 'task', ref: '700', title: 'A', spaceId: work(), meta: { hspace: 'lab' } });
+  assert.equal(byName.spaceId, lab.id, 'same name, any case');
+  const byChoice = await ann.post('/api/notes/from-item', { kind: 'task', ref: '701', title: 'B', spaceId: work(), meta: { hspace: 'Projekti' } });
+  assert.equal(byChoice.spaceId, other.id, 'chosen association');
+  const none = await ann.post('/api/notes/from-item', { kind: 'task', ref: '702', title: 'C', spaceId: work(), meta: { hspace: 'Unknown' } });
+  assert.equal(none.spaceId, work(), 'no match: the current space');
 });

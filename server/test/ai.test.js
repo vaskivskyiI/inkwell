@@ -131,7 +131,7 @@ test('Halcyon: connect, search, meeting note from an event, action items become 
     const events = await ann.get('/api/halcyon/events');
     assert.equal(events[0].title, 'Design review');
     const note = await ann.post('/api/notes/meeting', { spaceId: work(), event: events[0] });
-    assert.equal(note.title, 'Design review');
+    assert.match(note.title, /^Design review \d{4}-\d{2}-\d{2}$/);
     const md = await ann.get(`/api/notes/${note.id}/export`);
     assert.match(md, /\*\*Where:\*\* Room 4/);
     assert.match(md, /\*\*Attendees:\*\* Ann, Bob/);

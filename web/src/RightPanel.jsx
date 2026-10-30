@@ -211,7 +211,7 @@ export function AskTab({ detail, standalone = false }) {
     <div className={`ask-tab${standalone ? ' standalone' : ''}`}>
       <div className="seg">
         {detail && <button className={scope === 'page' ? 'on' : ''} onClick={() => setScope('page')}>This page</button>}
-        <button className={scope === 'space' ? 'on' : ''} onClick={() => setScope('space')}>This space</button>
+        {spaceId !== 'all' && <button className={scope === 'space' ? 'on' : ''} onClick={() => setScope('space')}>This space</button>}
         <button className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>All spaces</button>
       </div>
       <div className="chat">

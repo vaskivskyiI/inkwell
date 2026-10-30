@@ -11,14 +11,14 @@ const wsUrl = (path) => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${lo
 export async function loadSpaces() {
   const spaces = await get('/api/spaces');
   const s = store.get();
-  const spaceId = spaces.some((x) => x.id === s.spaceId) ? s.spaceId : spaces[0]?.id;
+  const spaceId = s.spaceId === 'all' || spaces.some((x) => x.id === s.spaceId) ? s.spaceId : spaces[0]?.id;
   store.set({ spaces, spaceId });
   localSet('spaceId', spaceId);
   return spaces;
 }
 
 export async function loadTree(spaceId) {
-  if (!spaceId) return;
+  if (!spaceId || spaceId === 'all') return;
   const { notes } = await get(`/api/spaces/${spaceId}/tree`);
   setTree(spaceId, notes);
 }
@@ -28,7 +28,7 @@ export const loadFavorites = async () => store.set({ favorites: await get('/api/
 export function switchSpace(id) {
   store.set({ spaceId: id });
   localSet('spaceId', id);
-  if (!store.get().trees[id]) loadTree(id);
+  if (id !== 'all' && !store.get().trees[id]) loadTree(id);
 }
 
 // ---- events

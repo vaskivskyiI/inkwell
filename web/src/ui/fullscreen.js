@@ -14,11 +14,14 @@ export async function toggleFullscreen(el, onChange) {
   }
   if (el.requestFullscreen) {
     try {
-      await el.requestFullscreen({ navigationUI: 'hide' });
-      const off = () => { if (document.fullscreenElement !== el) { document.removeEventListener('fullscreenchange', off); onChange?.(false); } };
-      document.addEventListener('fullscreenchange', off);
-      onChange?.(true);
-      return;
+      // Embedded browsers may neither enter full screen nor report failure: do not wait for them for long.
+      await Promise.race([el.requestFullscreen({ navigationUI: 'hide' }), new Promise((r) => { setTimeout(r, 600); })]);
+      if (document.fullscreenElement === el) {
+        const off = () => { if (document.fullscreenElement !== el) { document.removeEventListener('fullscreenchange', off); onChange?.(false); } };
+        document.addEventListener('fullscreenchange', off);
+        onChange?.(true);
+        return;
+      }
     } catch { /* fall back below */ }
   }
   el.classList.add('fs-fallback');

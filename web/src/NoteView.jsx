@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2 } from 'lucide-react';
+import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2, MoveHorizontal } from 'lucide-react';
 import { toggleFullscreen } from './ui/fullscreen.js';
 import { get, post, put, patch, del } from './api.js';
 import { store, useStore, findNote, openNote, navigate, toast, toastError, localSet } from './store.js';
@@ -19,6 +19,7 @@ export function NoteView({ id }) {
   const [error, setError] = useState(null);
   const [handle, setHandle] = useState(null);
   const [ready, setReady] = useState(false);
+  const [wide, setWide] = useState(false);
 
   const loadDetail = () => get(`/api/notes/${id}`).then((d) => {
     setDetail(d);
@@ -31,6 +32,11 @@ export function NoteView({ id }) {
     loadDetail().catch((e) => setError(e));
     const h = openDoc(id, user);
     setHandle(h);
+    // Full or fixed width belongs to the page, on every device.
+    const meta = h.doc.getMap('meta');
+    const onMeta = () => setWide(!!meta.get('wide'));
+    meta.observe(onMeta);
+    onMeta();
     // Show the page as soon as either the offline copy or the server copy is there.
     let done = false;
     const show = () => { if (!done) { done = true; setReady(true); } };
@@ -46,15 +52,15 @@ export function NoteView({ id }) {
       if (m.type === 'note:links' && m.noteId === id) loadDetail().catch(() => {});
       if (m.type === 'note:removed' && m.ids.includes(id)) { toast('This page was moved to the trash'); navigate('#/'); }
     });
-    return () => { clearTimeout(t); h.provider.off('synced', show); off(); h.release(); };
+    return () => { clearTimeout(t); h.provider.off('synced', show); off(); meta.unobserve(onMeta); h.release(); };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (error) return <div className="empty-state"><h2>{error.status === 404 ? 'Page not found' : 'Could not open the page'}</h2><p>{error.message}</p><button onClick={() => navigate('#/')}>Go home</button></div>;
   if (!detail || !handle) return <div className="note-loading"><span className="spinner" /></div>;
   const readOnly = !['owner', 'editor'].includes(detail.role) || !!detail.deletedAt;
   return (
-    <div className={`note-view kind-${detail.kind}`}>
-      <NoteHeader detail={detail} setDetail={setDetail} handle={handle} readOnly={readOnly} />
+    <div className={`note-view kind-${detail.kind}${wide ? ' wide' : ''}`}>
+      <NoteHeader detail={detail} setDetail={setDetail} handle={handle} readOnly={readOnly} wide={wide} />
       <div className="note-scroll" id="note-scroll">
         <div className={detail.kind === 'journal' ? 'journal-col' : 'page-col'}>
           <TitleRow detail={detail} setDetail={setDetail} doc={handle.doc} readOnly={readOnly} />
@@ -107,7 +113,7 @@ function Presence({ provider }) {
   return <div className="presence" title={`Also here: ${people.map((p) => p.name).join(', ')}`}>{people.slice(0, 5).map((p) => <span key={p.id || p.name} className="avatar" style={{ background: p.color }}>{p.name[0]?.toUpperCase()}</span>)}</div>;
 }
 
-function NoteHeader({ detail, setDetail, handle, readOnly }) {
+function NoteHeader({ detail, setDetail, handle, readOnly, wide }) {
   const panel = useStore((s) => s.panel);
   const online = useStore((s) => s.online);
   const spaces = useStore((s) => s.spaces);
@@ -150,6 +156,7 @@ function NoteHeader({ detail, setDetail, handle, readOnly }) {
         {!online && <span className="offline" title="Offline — changes are kept on this device and sync when you're back"><WifiOff size={15} /> Offline</span>}
         {readOnly && !detail.deletedAt && <span className="readonly" title="You can view this page"><Eye size={15} /> View only</span>}
         <Presence provider={handle.provider} />
+        {detail.kind === 'page' && <button className={`icon${wide ? ' on' : ''}`} onClick={() => handle.doc.getMap('meta').set('wide', !wide)} title={wide ? 'Fixed width' : 'Full width'} aria-label={wide ? 'Fixed width' : 'Full width'}><MoveHorizontal size={18} /></button>}
         <button className="icon" onClick={(e) => toggleFullscreen(e.currentTarget.closest('.note-view'))} title="Full screen" aria-label="Full screen"><Maximize2 size={18} /></button>
         {detail.kind === 'page' && !readOnly && <button className={`icon${penLayer ? ' on' : ''}`} onClick={() => store.set({ penLayer: !penLayer })} title="Write by hand on top of this page" aria-label="Pen on page"><PenLine size={18} /></button>}
         <button className={`icon${detail.favorite ? ' fav' : ''}`} onClick={toggleFav} title="Favourite" aria-label="Favourite"><Star size={18} /></button>

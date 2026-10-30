@@ -82,4 +82,7 @@ export function findNote(id) {
   for (const list of Object.values(state.trees)) { const n = list.find((x) => x.id === id); if (n) return n; }
   return null;
 }
-export const currentSpace = () => state.spaces.find((s) => s.id === state.spaceId) || state.spaces[0];
+/** The space new pages go to: the selected one, or in "All spaces" the first the user can write in. */
+export const currentSpace = () => state.spaces.find((s) => s.id === state.spaceId)
+  || state.spaces.find((s) => ['owner', 'editor'].includes(s.role)) || state.spaces[0];
+export const filterSpace = () => (state.spaceId === 'all' ? '' : state.spaceId || '');
