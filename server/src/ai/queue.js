@@ -51,6 +51,7 @@ async function work() {
             AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.type = $5 AND j.ref = $6 AND j.status = 'queued')`, job.id, now() + 30e3 * 4 ** (job.attempts - 1), e.message.slice(0, 500), now(), job.type, job.ref);
           await q("DELETE FROM jobs WHERE id = $1 AND status = 'running'", job.id);
         } else {
+          await q("DELETE FROM jobs WHERE type = $1 AND ref = $2 AND status = 'failed'", job.type, job.ref); // only the latest failure counts
           await q("UPDATE jobs SET status = 'failed', error = $2, updated_at = $3 WHERE id = $1", job.id, e.message.slice(0, 500), now());
         }
         await handlers.get(`${job.type}:failed`)?.(job, e, retry).catch(() => {});

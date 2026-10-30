@@ -7,7 +7,7 @@ import { PROVIDER_TYPES, makeProvider } from '../ai/providers/index.js';
 import { availableProviders, resolve, forgetProvider } from '../ai/router.js';
 import { MODEL_ADVICE, describeModels } from '../ai/models.js';
 import { INLINE_ACTIONS, inlineSystem, reviewSystem } from '../ai/prompts.js';
-import { enqueue } from '../ai/queue.js';
+import { enqueue, kick } from '../ai/queue.js';
 import { resumeWaiting, reanalyseAll } from '../ai/tasks.js';
 import { ask } from '../ai/assistant.js';
 import { related } from '../search.js';
@@ -210,8 +210,13 @@ export default async function aiRoutes(app) {
 
   app.get('/api/ai/failed', async (req) => (await many("SELECT type, ref, error, updated_at FROM jobs WHERE user_id = $1 AND status = 'failed' ORDER BY updated_at DESC LIMIT 50", req.user.id)));
   app.post('/api/ai/failed/retry', async (req) => {
-    await q("UPDATE jobs SET status = 'queued', attempts = 0, run_after = $2 WHERE user_id = $1 AND status = 'failed' AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.type = jobs.type AND j.ref = jobs.ref AND j.status = 'queued')", req.user.id, now());
+    // The same work can have failed more than once, and only one queued job per (type, ref) may exist.
+    const back = await many(`UPDATE jobs SET status = 'queued', attempts = 0, error = NULL, run_after = $2, updated_at = $2 WHERE id IN (
+      SELECT DISTINCT ON (f.type, f.ref) f.id FROM jobs f WHERE f.user_id = $1 AND f.status = 'failed'
+        AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.type = f.type AND j.ref = f.ref AND j.status = 'queued')
+      ORDER BY f.type, f.ref, f.updated_at DESC) RETURNING id`, req.user.id, now());
     await q("DELETE FROM jobs WHERE user_id = $1 AND status = 'failed'", req.user.id);
-    return { ok: true };
+    kick();
+    return { queued: back.length };
   });
 }

@@ -208,6 +208,9 @@ function AiSettings() {
   const [models, setModels] = useState({});
   const load = () => Promise.all([get('/api/ai/providers').then(setProviders), get('/api/ai/status').then(setStatus), get('/api/ai/failed').then(setFailed)]).catch(toastError);
   useEffect(() => { get('/api/ai/types').then(setTypes).catch(toastError); load(); }, []);
+  // While work runs, keep the counts and any new failure reason current.
+  const busy = (status?.jobs.queued || 0) + (status?.jobs.running || 0);
+  useEffect(() => { if (!busy) return undefined; const t = setTimeout(load, 4000); return () => clearTimeout(t); }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
   const [shown, setShown] = useState(null);
   const loadModels = (id, body = { id }) => post('/api/ai/models', body).then((m) => m, (e) => ({ error: e.message })).then((m) => { setModels((x) => ({ ...x, [id]: m })); return m; });
   const chosen = ['chat', 'vision', 'embed', 'audio'].map((t) => settings?.ai[t]?.providerId).filter(Boolean).join();
@@ -224,6 +227,7 @@ function AiSettings() {
   const route = (task, providerId, model) => saveSettings({ ai: { [task]: providerId ? { providerId, model } : null } }).then(load);
   if (!settings) return null;
   const T = (id) => types.find((t) => t.id === id);
+  const reasons = Object.entries(failed.reduce((all, f) => { const k = `${f.type}: ${f.error}`; all[k] = (all[k] || 0) + 1; return all; }, {}));
   return (
     <>
       <h2>AI</h2>
@@ -288,9 +292,10 @@ function AiSettings() {
       <p>{status ? `${status.jobs.queued} waiting · ${status.jobs.running} running · ${status.jobs.failed} failed` : '…'}</p>
       <div className="row">
         <button onClick={() => post('/api/ai/reanalyse').then((r) => toast(`${r.queued} pages queued`)).catch(toastError)}><RefreshCw size={14} /> Re-analyse all my pages</button>
-        {failed.length > 0 && <button onClick={() => post('/api/ai/failed/retry').then(load).catch(toastError)}>Retry failed</button>}
+        {failed.length > 0 && <button onClick={() => post('/api/ai/failed/retry').then((r) => { toast(`${r.queued} job${r.queued === 1 ? '' : 's'} queued again`); return load(); }).catch(toastError)}><RefreshCw size={14} /> Try failed work again</button>}
       </div>
-      {failed.slice(0, 5).map((f, i) => <p key={i} className="error small">{f.type}: {f.error}</p>)}
+      {reasons.length > 0 && <h4>Why it failed</h4>}
+      {reasons.slice(0, 5).map(([text, n]) => <p key={text} className="error small">{text}{n > 1 ? ` (${n} times)` : ''}</p>)}
     </>
   );
 }

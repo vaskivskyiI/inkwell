@@ -178,3 +178,15 @@ test('providers can be edited; models are listed with their tasks and suggestion
   await ann.del(`/api/ai/providers/${id}`);
   await ann.del(`/api/ai/providers/${shared.id}`);
 });
+
+test('failed work can be retried, also when the same job failed more than once', async () => {
+  const { q } = await import('../src/db/index.js');
+  const n = await ann.post('/api/notes', { spaceId: work(), title: 'Failed twice' });
+  const t = Date.now();
+  for (const age of [2, 1]) await q("INSERT INTO jobs (user_id, type, ref, status, attempts, error, run_after, created_at, updated_at) VALUES ($1, 'embed', $2, 'failed', 4, 'boom', $3, $3, $3)", ann.user.id, n.id, t - age);
+  assert.equal((await ann.get('/api/ai/failed')).length, 2);
+  assert.deepEqual(await ann.post('/api/ai/failed/retry'), { queued: 1 });
+  assert.equal((await ann.get('/api/ai/failed')).length, 0);
+  await drain();
+  assert.equal((await ann.get('/api/ai/failed')).length, 0, 'it worked this time');
+});
