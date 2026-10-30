@@ -161,6 +161,10 @@ export function extract(ydoc, { recognitions = {}, assetText } = {}) {
   const ctxBase = { ink: (id) => recognitions[id], assetText, inkIds: new Set(), assets: new Set(), mentions: new Set() };
   const markdown = blocksMd(frag, ctxBase);
   const text = blocksMd(frag, { ...ctxBase, plain: true, inkIds: null, assets: null, mentions: null });
+  // Pictures on canvases that still exist count as used files and are described in the page's text.
+  const canvasImages = [...ydoc.getMap('images').values()].filter((m) => m instanceof Y.Map && (m.get('canvas') === 'page' || ctxBase.inkIds.has(m.get('canvas'))));
+  const pictureMd = canvasImages.map((m) => imageMd({ getAttribute: (k) => (k === 'src' ? m.get('src') : '') }, ctxBase)).filter(Boolean);
+  const pictureText = canvasImages.map((m) => imageMd({ getAttribute: (k) => (k === 'src' ? m.get('src') : '') }, { ...ctxBase, plain: true, assets: null })).filter(Boolean);
   const boxes = [...ydoc.getMap('boxes').values()].map((b) => (b instanceof Y.Map ? String(b.get('text') || '') : '')).filter(Boolean);
   const inkMap = ydoc.getMap('ink');
   const canvases = [...inkMap.keys()].map((id) => {
@@ -169,8 +173,8 @@ export function extract(ydoc, { recognitions = {}, assetText } = {}) {
   }).filter((c) => c.strokes.length && (WHOLE_PAGE_CANVASES.includes(c.id) || ctxBase.inkIds.has(c.id)));
   // `page`: a journal's paper; `overlay`: handwriting on top of a typed page.
   const pageInk = WHOLE_PAGE_CANVASES.filter((id) => recognitions[id]).map((id) => `✍️ *(handwritten ${id === 'page' ? 'page' : 'notes on the page'})*\n${recognitions[id]}`);
-  const fullMd = [markdown, boxes.join('\n\n'), ...pageInk].filter(Boolean).join('\n\n');
-  const fullText = [text, boxes.join('\n'), ...WHOLE_PAGE_CANVASES.map((id) => recognitions[id] || '')].filter(Boolean).join('\n');
+  const fullMd = [markdown, ...pictureMd, boxes.join('\n\n'), ...pageInk].filter(Boolean).join('\n\n');
+  const fullText = [text, ...pictureText, boxes.join('\n'), ...WHOLE_PAGE_CANVASES.map((id) => recognitions[id] || '')].filter(Boolean).join('\n');
   const tags = [...new Set([...manualTags(ydoc), ...[...fullText.matchAll(/(?:^|\s)#([\p{L}\p{N}_-]{2,40})/gu)].map((m) => m[1].toLowerCase())])];
   return {
     title, markdown: fullMd, text: fullText, tags, canvases,
@@ -228,6 +232,21 @@ export function buildDoc({ title = '', blocks = [], paper } = {}) {
   if (blocks.length) appendBlocks(d, blocks);
   if (paper) d.getMap('meta').set('paper', paper);
   return d;
+}
+
+/** Pictures of a canvas as SVG, cropped and rotated as on screen, plus how far down they reach. */
+export function canvasImagesSvg(ydoc, canvasId, asset = (u) => u) {
+  let svg = '', bottom = 0;
+  const esc = (s) => String(s).replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+  for (const m of ydoc.getMap('images').values()) {
+    if (!(m instanceof Y.Map) || m.get('canvas') !== canvasId || !/^\/api\/assets\//.test(m.get('src') || '')) continue;
+    const [l, t, r, b] = m.get('crop') || [0, 0, 0, 0];
+    const x = Number(m.get('x')) || 0, y = Number(m.get('y')) || 0, w = Number(m.get('w')) || 100, rot = Number(m.get('rot')) || 0;
+    const fw = w / (1 - l - r), fh = fw * (Number(m.get('ratio')) || 1), h = fh * (1 - t - b);
+    bottom = Math.max(bottom, y + h);
+    svg += `<g transform="rotate(${rot} ${x + w / 2} ${y + h / 2})"><svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="${l * fw} ${t * fh} ${w} ${h}"><image href="${esc(asset(m.get('src')))}" width="${fw}" height="${fh}" preserveAspectRatio="none"/></svg></g>`;
+  }
+  return { svg, bottom };
 }
 
 export const encode = (ydoc) => Y.encodeStateAsUpdate(ydoc);

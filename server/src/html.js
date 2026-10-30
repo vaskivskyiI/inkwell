@@ -1,6 +1,6 @@
 // Page → standalone HTML (export and public read-only links). Ink blocks become inline SVG.
 import * as Y from 'yjs';
-import { strokesOf } from './docmodel.js';
+import { strokesOf, canvasImagesSvg } from './docmodel.js';
 import { strokesToSvg } from './ink/render.js';
 
 const esc = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
@@ -55,7 +55,8 @@ function block(el, ctx) {
       const strokes = strokesOf(ctx.doc, el.getAttribute('id'));
       const h = Number(el.getAttribute('height')) || 240;
       const bg = el.getAttribute('bg');
-      const svg = strokes.length ? strokesToSvg(strokes, { height: h, background: '' }) : '';
+      const pics = canvasImagesSvg(ctx.doc, el.getAttribute('id'), ctx.asset);
+      const svg = strokes.length || pics.svg ? strokesToSvg(strokes, { height: Math.max(h, pics.bottom), background: '', under: pics.svg }) : '';
       if (bg) return `<figure class="ink photo"><img src="${esc(ctx.asset(safeUrl(bg)))}" alt="">${svg ? `<div class="over">${svg}</div>` : ''}</figure>`;
       return svg ? `<figure class="ink">${svg}</figure>` : '';
     }
@@ -68,7 +69,8 @@ export function pageHtml(ydoc, { title, asset = (u) => u } = {}) {
   const body = kids(ydoc.getXmlFragment('default'), ctx);
   const page = strokesOf(ydoc, 'page');
   const boxes = [...ydoc.getMap('boxes').values()].map((b) => `<p>${esc(b.get?.('text')?.toString() || '')}</p>`).join('');
-  const journal = page.length ? `<figure class="ink">${strokesToSvg(page, { background: '' })}</figure>` : '';
+  const pics = canvasImagesSvg(ydoc, 'page', asset);
+  const journal = page.length || pics.svg ? `<figure class="ink">${strokesToSvg(page, { background: '', height: pics.bottom, under: pics.svg })}</figure>` : '';
   const over = strokesOf(ydoc, 'overlay');
   const overlay = over.length ? `<figure class="ink"><figcaption>Handwritten on the page</figcaption>${strokesToSvg(over, { background: '' })}</figure>` : '';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

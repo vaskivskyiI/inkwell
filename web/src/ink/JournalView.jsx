@@ -1,13 +1,15 @@
 // A pen-first journal page: endless paper (ruled / grid / dotted / plain), ink anywhere, typed text boxes.
 import { useRef, useState, useEffect } from 'react';
 import * as Y from 'yjs';
-import { GripHorizontal, Plus, X } from 'lucide-react';
+import { GripHorizontal, Plus, X, FileText, Copy, ScanText } from 'lucide-react';
 import { InkCanvas } from './InkCanvas.jsx';
 import { InkToolbar, toolKey, setInkTool, FullscreenButton } from './InkToolbar.jsx';
 import { sid } from './geometry.js';
 import { useYObserve, applyText } from '../ui/ytext.js';
 import { post } from '../api.js';
-import { toast, toastError, useStore } from '../store.js';
+import { Markdown } from '../ui/Markdown.jsx';
+import { addCanvasImage } from './CanvasImages.jsx';
+import { toast, toastError, useStore, openNote } from '../store.js';
 
 const PAPERS = [['ruled', 'Ruled'], ['grid', 'Grid'], ['dotted', 'Dotted'], ['plain', 'Plain']];
 
@@ -19,6 +21,7 @@ export function JournalView({ note, doc, readOnly }) {
   const canvas = useRef(null);
   const paper = meta.get('paper') || 'ruled';
   const [height, setHeight] = useState(() => meta.get('height') || 1400);
+  const [showText, setShowText] = useState(false);
   const rec = useStore((s) => s.inkText[note.id]?.page);
 
   useEffect(() => {
@@ -43,24 +46,52 @@ export function JournalView({ note, doc, readOnly }) {
   const transcribe = () => post(`/api/notes/${note.id}/ink/page/recognize`).then(() => toast('Reading your handwriting…')).catch(toastError);
 
   return (
-    <div className="journal" onKeyDown={(e) => { if (!readOnly && e.target.tagName !== 'TEXTAREA' && toolKey(e)) e.preventDefault(); }}>
+    <div className="journal" onPaste={(e) => { const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith('image/')); if (f && !readOnly) { e.preventDefault(); addCanvasImage(doc, 'page', f, note.id, canvas.current?.viewCenter() || { x: 500, y: 200 }); } }} onKeyDown={(e) => { if (!readOnly && e.target.tagName !== 'TEXTAREA' && toolKey(e)) e.preventDefault(); }}>
+      {readOnly && <button className="recognized-toggle" onClick={() => setShowText(!showText)}><FileText size={15} /> Recognized text</button>}
       {!readOnly && (
         <div className="journal-tools">
-          <InkToolbar canvas={canvas} text onTranscribe={transcribe} extra={<FullscreenButton selector=".journal" />} />
+          <InkToolbar canvas={canvas} text onTranscribe={transcribe} imageTarget={{ doc, canvasId: 'page', noteId: note.id }} extra={<FullscreenButton selector=".journal" />} />
+          <button className={`recognized-toggle${showText ? ' on' : ''}`} title="Show what AI read on this page" onClick={() => setShowText(!showText)}><FileText size={15} /> Recognized text</button>
           <select value={paper} onChange={(e) => meta.set('paper', e.target.value)} aria-label="Paper">
             {PAPERS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
         </div>
       )}
+      <div className={`journal-body${showText ? ' split' : ''}`}>
       <div className="journal-paper">
-        <InkCanvas ref={canvas} doc={doc} canvasId="page" height={height} minHeight={1400} autoGrow onHeightChange={grow} readOnly={readOnly} paper={paper}
+        <InkCanvas ref={canvas} doc={doc} canvasId="page" height={height} minHeight={1400} autoGrow onHeightChange={grow} readOnly={readOnly} paper={paper} images
           onTap={readOnly ? undefined : addBox} onSpace={(y0, dy) => doc.transact(() => { for (const m of boxes.values()) if (m.get('y') >= y0) m.set('y', Math.max(0, m.get('y') + dy)); })}>
           {(scale) => [...boxes.entries()].map(([id, m]) => <TextBox key={id} id={id} map={m} scale={scale} readOnly={readOnly} onDelete={() => boxes.delete(id)} />)}
         </InkCanvas>
         {!readOnly && <button className="add-paper" onClick={() => grow(height + 1000)}><Plus size={15} /> More paper</button>}
       </div>
-      {rec?.text && <details className="journal-transcript"><summary>What AI read on this page</summary><pre>{rec.text}</pre></details>}
+      {showText && <RecognizedText rec={rec} note={note} onRead={transcribe} readOnly={readOnly} />}
+      </div>
     </div>
+  );
+}
+
+// What AI read on the page, next to the handwriting.
+function RecognizedText({ rec, note, onRead, readOnly }) {
+  const typed = async () => {
+    try { openNote((await post('/api/notes', { spaceId: note.spaceId, parentId: note.id, title: `${note.title || 'Handwritten'} (typed)`, markdown: rec.text })).id); } catch (e) { toastError(e); }
+  };
+  return (
+    <aside className="recognized" aria-label="Recognized text">
+      {rec?.text ? <>
+        <Markdown text={rec.text} />
+        {!!rec.data?.todos?.length && <p className="muted small">To-dos found: {rec.data.todos.join(' · ')}</p>}
+        {rec.data?.confidence != null && rec.data.confidence < 0.6 && <p className="muted small">AI was not sure about parts of this.</p>}
+        <div className="row wrap">
+          <button onClick={() => { navigator.clipboard?.writeText(rec.text); toast('Copied'); }}><Copy size={14} /> Copy</button>
+          {!readOnly && <button onClick={typed}>Make typed page</button>}
+          {!readOnly && <button onClick={onRead}><ScanText size={14} /> Read again</button>}
+        </div>
+      </> : <>
+        <p className="muted">{rec?.error ? `AI could not read this page: ${rec.error}` : 'Not read yet. AI reads the page a few seconds after you stop writing; it needs a vision model (Settings → AI).'}</p>
+        {!readOnly && <button onClick={onRead}><ScanText size={14} /> Read now</button>}
+      </>}
+    </aside>
   );
 }
 

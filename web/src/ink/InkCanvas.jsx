@@ -7,9 +7,9 @@ import * as Y from 'yjs';
 import { CANVAS_WIDTH, TOOLS, outline, path2d, hits, strokeInLasso, bounds, sid } from './geometry.js';
 import { recognize, eraseFromStroke } from './shapes.js';
 import { keepKeyboardAway } from './keyboard.js';
+import { CanvasImages, LOCAL, shiftImages } from './CanvasImages.jsx';
 import { useStore, store } from '../store.js';
 
-const LOCAL = { local: true };
 const MAX_ZOOM = 3;
 let penSeen = false;
 export const penOnlyActive = () => {
@@ -27,7 +27,7 @@ const scrollParent = (el) => {
 
 // offsetOf(stroke) → vertical shift in logical units (ink anchored to text that moved); anchorFor(stroke) → anchor
 // stored on new strokes; redrawKey: changes when offsets may have changed.
-export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, onHeightChange, autoGrow = false, minHeight = 200, readOnly = false, paper = 'plain', background, onTap, children, onStrokesChange, zoomable = true, offsetOf, anchorFor, redrawKey, spaceable = true, onSpace }, ref) {
+export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, onHeightChange, autoGrow = false, minHeight = 200, readOnly = false, paper = 'plain', background, onTap, children, onStrokesChange, zoomable = true, offsetOf, anchorFor, redrawKey, spaceable = true, onSpace, images = false }, ref) {
   const offOf = (s) => (s.a && offsetOf ? offsetOf(s) || 0 : 0);
   // The stroke where it is shown (points shifted by its offset), for hit tests and selection.
   const shown = (s) => { const o = offOf(s); return o ? { ...s, p: s.p.map((v, i) => (i % 3 === 1 ? v + o : v)) } : s; };
@@ -47,6 +47,8 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     undo: () => undo.current?.undo(), redo: () => undo.current?.redo(),
     canUndo: () => !!undo.current?.undoStack.length, canRedo: () => !!undo.current?.redoStack.length,
     clearSelection, deleteSelection, strokes: () => strokes.current, clear: () => { const a = yarr.current; if (a?.length) doc.transact(() => a.delete(0, a.length), LOCAL); },
+    // Where a new picture goes: the middle of what is on screen, in canvas units.
+    viewCenter: () => { const r = live.current.getBoundingClientRect(); return { x: (Math.min(r.right, window.innerWidth) / 2 + Math.max(r.left, 0) / 2 - r.left) / scale, y: ((Math.max(r.top, 0) + Math.min(r.bottom, window.innerHeight)) / 2 - r.top) / scale }; },
     zoomIn: () => zoomTo(zoom * 1.25), zoomOut: () => zoomTo(zoom / 1.25), zoomReset: () => zoomTo(1), zoom: () => zoom,
   }));
 
@@ -70,7 +72,8 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
       arr = a instanceof Y.Array ? a : null;
       yarr.current = arr;
       undo.current?.destroy();
-      undo.current = arr ? new Y.UndoManager(arr, { trackedOrigins: new Set([LOCAL]), captureTimeout: 300 }) : null;
+      const scope = [...(arr ? [arr] : []), ...(images ? [doc.getMap('images')] : [])];
+      undo.current = scope.length ? new Y.UndoManager(scope, { trackedOrigins: new Set([LOCAL]), captureTimeout: 300 }) : null;
       arr?.observe(sync);
       sync();
     };
@@ -332,6 +335,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
           a.push(moved);
         }, LOCAL);
       }
+      if (images) doc.transact(() => shiftImages(doc, canvasId, gs.y0, dy), LOCAL);
       onSpace?.(gs.y0, dy);
       if (dy > 0 && onHeightChange) onHeightChange(Math.ceil((h + dy) / 10) * 10);
     } else if (gs.kind === 'tap') onTap?.(gs.p[0], gs.p[1]);
@@ -429,8 +433,9 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     <div ref={wrap} className={`ink-canvas${zoom > 1 ? ' zoomed' : ''}`} style={{ height: H }} tabIndex={readOnly ? -1 : 0} onKeyDown={onKey}>
       <div className="ink-inner" style={{ width: W || '100%', height: H, ...bg }}>
         {background && <img className="ink-photo" src={background} alt="" draggable={false} />}
-        <canvas ref={base} style={{ width: W, height: H }} />
-        <canvas ref={live} className="ink-live" style={{ width: W, height: H, cursor, touchAction: 'none' }}
+        {images && <CanvasImages doc={doc} canvasId={canvasId} scale={scale} active={tool.tool === 'pick'} readOnly={readOnly} onBottom={(b) => { if (onHeightChange && b > h - 40) onHeightChange(Math.ceil((b + 120) / 10) * 10); }} />}
+        <canvas ref={base} style={{ width: W, height: H, pointerEvents: 'none' }} />
+        <canvas ref={live} className="ink-live" style={{ width: W, height: H, cursor, touchAction: 'none', pointerEvents: tool.tool === 'pick' && images ? 'none' : undefined }}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onContextMenu={(e) => e.preventDefault()} />
         {children?.(scale)}
       </div>

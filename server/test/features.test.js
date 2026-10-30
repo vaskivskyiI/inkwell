@@ -308,3 +308,22 @@ test('a page moved to another space keeps its files readable there', async () =>
   await ann.patch(`/api/notes/${n.id}`, { spaceId: team.id });
   assert.equal(await bob2.status('GET', a.url), 200);
 });
+
+test('pictures on a canvas count as used files and appear in exports, cropped and rotated', async () => {
+  const j = await ann.post('/api/notes', { spaceId: work(), kind: 'journal', title: 'With picture' });
+  const b = 'b3';
+  const body = `--${b}\r\nContent-Disposition: form-data; name="noteId"\r\n\r\n${j.id}\r\n--${b}\r\nContent-Disposition: form-data; name="file"; filename="c.png"\r\nContent-Type: image/x-test\r\n\r\ncanvas pic\r\n--${b}--\r\n`;
+  const a = JSON.parse((await app.inject({ method: 'POST', url: '/api/assets', payload: body, headers: { cookie: ann.cookie, 'content-type': `multipart/form-data; boundary=${b}` } })).body);
+  await withDoc(j.id, (d) => {
+    const m = new Y.Map();
+    for (const [k, v] of Object.entries({ canvas: 'page', src: a.url, x: 100, y: 200, w: 300, ratio: 0.5, rot: 90, crop: [0.5, 0, 0, 0] })) m.set(k, v);
+    d.getMap('images').set('i1', m);
+  }, ann.user);
+  const { one } = await import('../src/db/index.js');
+  assert.ok(await one('SELECT 1 FROM asset_refs WHERE asset_id = $1 AND note_id = $2', a.id, j.id));
+  const html = await ann.get(`/api/notes/${j.id}/export?format=html`);
+  assert.match(html, /rotate\(90 250 350\)/);
+  assert.match(html, /viewBox="300 0 300 300"/, 'cropped half of a 600 wide picture');
+  assert.match(html, new RegExp(`<image href="${a.url}"`));
+  assert.match(await ann.get(`/api/notes/${j.id}/export`), new RegExp(a.url));
+});

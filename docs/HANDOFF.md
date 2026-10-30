@@ -48,7 +48,7 @@ MCP endpoint (no Halcyon changes needed for the Inkwell → Halcyon direction).
 
 ## 5. Architecture essentials
 - Page = Y.Doc `note:<id>`: `title` Y.Text, `default` XmlFragment (TipTap), `ink` Y.Map canvasId → Y.Array of strokes
-  `{id,t,c,w,p:[x,y,pressure…]}` (logical width 1000), `boxes` (journal text boxes), `meta` (paper, height).
+  `{id,t,c,w,p:[x,y,pressure…]}` (logical width 1000), `boxes` (journal text boxes), `images` (pictures on canvases: id → Y.Map {canvas,src,x,y,w,ratio,rot,crop}, drawn under the ink; `web/src/ink/CanvasImages.jsx`), `meta` (paper, height).
   Journal pages use canvas id `page`; inline ink blocks use their node's `id`.
 - Store (`collab.persist`, debounced 2–10 s): title/text/tags/search vector, page-mention backlinks, version snapshot
   (≥10 min apart), then — only if the content hash changed — jobs `analyze`, `embed` and `ink` (per canvas whose

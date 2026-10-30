@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { addCanvasImage } from './CanvasImages.jsx';
 import { toggleCanvasFullscreen } from '../ui/fullscreen.js';
-import { PenLine, Highlighter, Eraser, Lasso, Type, Undo2, Redo2, Trash2, ScanText, Shapes, ZoomIn, ZoomOut, Scissors, Maximize2, Minimize2, UnfoldVertical } from 'lucide-react';
+import { PenLine, Highlighter, Eraser, Lasso, Type, Undo2, Redo2, Trash2, ScanText, Shapes, ZoomIn, ZoomOut, Scissors, Maximize2, Minimize2, UnfoldVertical, ImagePlus, Camera, MousePointer2 } from 'lucide-react';
 import { useStore, store, localSet } from '../store.js';
 
 export const COLORS = ['#1f2937', '#2563eb', '#dc2626', '#16a34a', '#9333ea', '#ea580c'];
@@ -13,9 +14,11 @@ export function setInkTool(patch) {
   localSet('inkTool', JSON.stringify(next));
 }
 
-export function InkToolbar({ canvas, text = false, space = true, onTranscribe, compact = false, onDeleteBlock, zoom = true, extra }) {
+export function InkToolbar({ canvas, text = false, space = true, onTranscribe, compact = false, onDeleteBlock, zoom = true, extra, imageTarget }) {
   const t = useStore((s) => s.inkTool);
-  const tools = [['pen', PenLine, 'Pen (P)'], ['hl', Highlighter, 'Highlighter (H)'], ['eraser', Eraser, 'Eraser (E) — the pen\'s eraser button works too'], ['lasso', Lasso, 'Select & move (L)'], ...(space ? [['space', UnfoldVertical, 'Insert space (S): drag down from where you need room; drag up to close empty space']] : []), ...(text ? [['text', Type, 'Text box (T)']] : [])];
+  const pick = useRef(null), camera = useRef(null);
+  const addFile = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) addCanvasImage(imageTarget.doc, imageTarget.canvasId, f, imageTarget.noteId, canvas.current?.viewCenter() || { x: 500, y: 200 }); };
+  const tools = [['pen', PenLine, 'Pen (P)'], ['hl', Highlighter, 'Highlighter (H)'], ['eraser', Eraser, 'Eraser (E) — the pen\'s eraser button works too'], ['lasso', Lasso, 'Select & move (L)'], ...(space ? [['space', UnfoldVertical, 'Insert space (S): drag down from where you need room; drag up to close empty space']] : []), ...(text ? [['text', Type, 'Text box (T)']] : []), ...(imageTarget ? [['pick', MousePointer2, 'Select pictures: move, scale, rotate, crop (V)']] : [])];
   const palette = t.tool === 'hl' ? HL : COLORS;
   const drawing = t.tool === 'pen' || t.tool === 'hl';
   return (
@@ -23,6 +26,12 @@ export function InkToolbar({ canvas, text = false, space = true, onTranscribe, c
       {tools.map(([id, Icon, title]) => (
         <button key={id} className={t.tool === id ? 'on' : ''} title={title} aria-label={title} onClick={() => setInkTool({ tool: id })}><Icon size={17} /></button>
       ))}
+      {imageTarget && <>
+        <button title="Insert a picture" aria-label="Insert a picture" onClick={() => pick.current?.click()}><ImagePlus size={17} /></button>
+        <button className="touch-only" title="Take a photo" aria-label="Take a photo" onClick={() => camera.current?.click()}><Camera size={17} /></button>
+        <input ref={pick} type="file" hidden accept="image/*" onChange={addFile} />
+        <input ref={camera} type="file" hidden accept="image/*" capture="environment" onChange={addFile} />
+      </>}
       <span className="sep" />
       {drawing && palette.map((c) => (
         <button key={c} className={`swatch${t.color === c ? ' on' : ''}`} style={{ '--c': c }} title={c} aria-label={`Colour ${c}`} onClick={() => setInkTool({ color: c })} />
@@ -57,7 +66,7 @@ export function InkToolbar({ canvas, text = false, space = true, onTranscribe, c
 // Keyboard shortcuts for tools while a canvas has focus.
 export function toolKey(e) {
   if (e.ctrlKey || e.metaKey || e.altKey) return false;
-  const k = { p: 'pen', h: 'hl', e: 'eraser', l: 'lasso', t: 'text', s: 'space' }[e.key.toLowerCase()];
+  const k = { p: 'pen', h: 'hl', e: 'eraser', l: 'lasso', t: 'text', s: 'space', v: 'pick' }[e.key.toLowerCase()];
   if (!k) return false;
   setInkTool({ tool: k });
   return true;

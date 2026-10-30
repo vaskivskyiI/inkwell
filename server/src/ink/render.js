@@ -5,7 +5,7 @@ const esc = (s) => String(s).replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt
 const color = (c) => (/^#[0-9a-f]{3,8}$/i.test(c || '') ? c : '#111827');
 
 /** crop: tight box around the ink (for AI); otherwise the full logical canvas width. */
-export function strokesToSvg(strokes, { crop = false, height, background = '#ffffff', dark = false } = {}) {
+export function strokesToSvg(strokes, { crop = false, height, background = '#ffffff', dark = false, under = '' } = {}) {
   const b = bounds(strokes) || { minX: 0, minY: 0, maxX: CANVAS_WIDTH, maxY: 100 };
   const pad = 16;
   const x0 = crop ? Math.max(0, b.minX - pad) : 0;
@@ -19,7 +19,7 @@ export function strokesToSvg(strokes, { crop = false, height, background = '#fff
     return `<path d="${pathOf(outline(s))}" fill="${esc(c)}"${tool.opacity < 1 ? ` fill-opacity="${tool.opacity}"` : ''}/>`;
   }).join('');
   const bg = background ? `<rect x="${x0}" y="${y0}" width="${w}" height="${h}" fill="${esc(background)}"/>` : '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x0.toFixed(0)} ${y0.toFixed(0)} ${w.toFixed(0)} ${h.toFixed(0)}" width="${w.toFixed(0)}" height="${h.toFixed(0)}">${bg}${paths}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x0.toFixed(0)} ${y0.toFixed(0)} ${w.toFixed(0)} ${h.toFixed(0)}" width="${w.toFixed(0)}" height="${h.toFixed(0)}">${bg}${under}${paths}</svg>`;
 }
 
 let Resvg = null;

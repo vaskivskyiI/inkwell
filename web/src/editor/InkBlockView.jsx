@@ -5,6 +5,7 @@ import { InkCanvas } from '../ink/InkCanvas.jsx';
 import { InkToolbar, toolKey, FullscreenButton } from '../ink/InkToolbar.jsx';
 import { useStore, toast, toastError } from '../store.js';
 import { post } from '../api.js';
+import { Markdown } from '../ui/Markdown.jsx';
 
 export function InkBlockView({ node, updateAttributes, editor, extension, deleteNode, selected, getPos }) {
   const { doc, noteId } = extension.options;
@@ -13,6 +14,7 @@ export function InkBlockView({ node, updateAttributes, editor, extension, delete
   const rec = useStore((s) => s.inkText[noteId]?.[node.attrs.id]);
   const editable = editor.isEditable;
   const [drag, setDrag] = useState(null);
+  const [open, setOpen] = useState(false);
 
   const transcribe = () => post(`/api/notes/${noteId}/ink/${node.attrs.id}/recognize`).then(() => toast('Reading your handwriting…')).catch(toastError);
   const insertText = async () => {
@@ -35,16 +37,18 @@ export function InkBlockView({ node, updateAttributes, editor, extension, delete
       onKeyDown={(e) => { if (toolKey(e)) e.preventDefault(); }}>
       {editable && <div className="ink-block-bar" contentEditable={false}>
         <span className="drag" data-drag-handle draggable="true" title="Drag to move"><GripVertical size={15} /></span>
-        <InkToolbar canvas={canvas} compact space={!node.attrs.bg} onTranscribe={transcribe} onDeleteBlock={deleteNode} extra={<FullscreenButton selector=".ink-block" />} />
+        <InkToolbar canvas={canvas} compact space={!node.attrs.bg} imageTarget={node.attrs.bg ? undefined : { doc, canvasId: node.attrs.id, noteId }} onTranscribe={transcribe} onDeleteBlock={deleteNode} extra={<FullscreenButton selector=".ink-block" />} />
       </div>}
       <InkCanvas ref={canvas} doc={doc} canvasId={node.attrs.id} height={node.attrs.height} minHeight={node.attrs.bg ? 40 : 120} readOnly={!editable}
-        onHeightChange={node.attrs.bg ? undefined : (h) => updateAttributes({ height: h })} paper="plain" background={node.attrs.bg} spaceable={!node.attrs.bg} />
+        onHeightChange={node.attrs.bg ? undefined : (h) => updateAttributes({ height: h })} paper="plain" background={node.attrs.bg} spaceable={!node.attrs.bg} images={!node.attrs.bg} />
       {editable && node.attrs.bg && <div className="ink-corner" title="Drag to resize the picture" onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setDrag({ x: e.clientX, w: node.attrs.width || 100, page: e.currentTarget.closest('.ProseMirror').clientWidth }); }}
         onPointerMove={(e) => { if (drag) updateAttributes({ width: Math.min(100, Math.max(15, Math.round(drag.w + ((e.clientX - drag.x) / drag.page) * 100))) }); }} onPointerUp={() => setDrag(null)} />}
       {editable && !node.attrs.bg && <div className="ink-resize" onPointerDown={onResizeDown} onPointerMove={onResizeMove} onPointerUp={() => setDrag(null)} title="Drag to resize" />}
       {rec?.text && (
         <div className="ink-transcript" contentEditable={false}>
-          <Sparkles size={13} /> <span className="t">{rec.text.replace(/^\s*- \[[ xX]\]\s*/gm, '☐ ').replace(/^#+\s*/gm, '').replace(/[*_]{1,2}/g, '')}</span>
+          <Sparkles size={13} />
+          {open ? <div className="t full"><Markdown text={rec.text} /></div> : <span className="t">{rec.text.replace(/^\s*- \[[ xX]\]\s*/gm, '☐ ').replace(/^#+\s*/gm, '').replace(/[*_]{1,2}/g, '')}</span>}
+          <button onClick={() => setOpen(!open)} title="Show all that AI read">{open ? 'Less' : 'Full text'}</button>
           {editable && <button onClick={insertText} title="Insert the transcription as text below"><Copy size={13} /> As text</button>}
         </div>
       )}
