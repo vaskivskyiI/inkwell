@@ -507,3 +507,12 @@ table.members td:first-child { display: flex; align-items: center; gap: 8px; }
 .advice { margin: 10px 0; }
 .advice h4 { margin: 10px 0 2px; }
 .advice ul { margin: 0; padding-left: 18px; }
+/* The suite: one left menu, a second app beside the first */
+.embedded .rail { display: none; }
+.rail .profile-btn { width: 44px; height: 44px; border: 0; background: none; border-radius: 10px; cursor: pointer; display: grid; place-items: center; }
+.rail .desk-only .menu > button { width: 44px; height: 44px; border: 0; background: none; border-radius: 10px; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.side-pane { position: relative; flex: none; display: flex; flex-direction: column; min-width: 0; border-left: 1px solid var(--border); background: var(--bg); }
+.side-pane iframe { flex: 1; width: 100%; border: 0; }
+.side-head { display: flex; align-items: center; gap: 4px; height: 34px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.side-drag { position: absolute; top: 0; bottom: 0; left: -3px; width: 6px; cursor: col-resize; z-index: 2; }
+@media (max-width: 900px) { .side-pane { display: none; } }

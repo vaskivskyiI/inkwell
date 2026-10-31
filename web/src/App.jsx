@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { SidePane } from './SidePane.jsx';
 import { Menu as MenuIcon } from 'lucide-react';
 import { get } from './api.js';
 import { store, useStore, localSet } from './store.js';
@@ -89,6 +90,7 @@ export function App() {
         <button className="icon burger" onClick={() => { const v = !sidebar; store.set({ sidebar: v }); localSet('sidebar', v ? '1' : '0'); }} aria-label="Toggle sidebar" title="Toggle sidebar (Ctrl+\)"><MenuIcon size={18} /></button>
         {main}
       </main>
+      <SidePane />
       <Palette />
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.text}{t.action && <button onClick={t.action.onClick}>{t.action.label}</button>}</div>)}

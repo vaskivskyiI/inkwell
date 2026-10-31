@@ -53,6 +53,9 @@ export async function buildServer() {
   });
 
   app.get('/api/health', async () => { await q('SELECT 1'); return { ok: true, version: '0.1.0' }; });
+  // Only this app and Halcyon may show it in a frame (side by side in the suite).
+  const frames = `frame-ancestors 'self'${config.halcyonUrl && config.halcyonSecret ? ` ${new URL(config.halcyonUrl).origin}` : ''}`;
+  app.addHook('onSend', async (req, reply) => { if (!reply.hasHeader('content-security-policy')) reply.header('content-security-policy', frames); });
   app.addHook('preHandler', requireUser);
 
   await app.register(authRoutes);

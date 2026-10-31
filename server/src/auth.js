@@ -77,7 +77,7 @@ export default async function authRoutes(app) {
   app.get('/api/auth/state', async (req) => {
     const u = await authenticate(req);
     const hasUsers = !!(await one('SELECT 1 FROM users LIMIT 1'));
-    return { user: publicUser(u), needsSetup: !hasUsers, allowSignup: !hasUsers || (await getServerSetting('allowSignup', config.allowSignup)), halcyonLogin: !!(config.halcyonUrl && config.halcyonSecret) };
+    return { user: publicUser(u), needsSetup: !hasUsers, allowSignup: !hasUsers || (await getServerSetting('allowSignup', config.allowSignup)), halcyonLogin: !!(config.halcyonUrl && config.halcyonSecret), halcyonUrl: config.halcyonSecret ? config.halcyonUrl : '' };
   });
 
   app.post('/api/auth/signup', async (req, reply) => {

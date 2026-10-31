@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { post } from './api.js';
 import { useStore } from './store.js';
 
@@ -10,6 +10,10 @@ export function AuthPage({ onDone }) {
   const [busy, setBusy] = useState(false);
   const failed = new URLSearchParams(location.search).get('sso_error');
   const viaHalcyon = () => { try { sessionStorage.setItem('afterLogin', location.hash); } catch { /* only comes back to the home page then */ } location.href = '/api/auth/halcyon/start'; };
+  // One sign-in for the suite: straight to Halcyon, unless the person just signed out or it did not work.
+  const q = new URLSearchParams(location.search);
+  const [local, setLocal] = useState(q.has('signedout') || q.has('local') || !!failed);
+  useEffect(() => { if (auth?.halcyonLogin && !auth.needsSetup && !local) viaHalcyon(); }, [auth, local]); // eslint-disable-line react-hooks/exhaustive-deps
   const submit = async (e) => {
     e.preventDefault();
     setErr(''); setBusy(true);

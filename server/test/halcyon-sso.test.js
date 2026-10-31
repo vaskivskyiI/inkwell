@@ -84,6 +84,17 @@ test('a shared space comes with its members, followed when they change; pages an
   assert.ok(await db.one('SELECT 1 FROM spaces WHERE id = $1', id), 'a space gone in Halcyon keeps its pages here');
 });
 
+test('signing out from Halcyon ends the session here and goes back only to Halcyon; frames only from it', async () => {
+  const r = await login('ann');
+  const c = session(r);
+  const out = await inject({ url: `/api/auth/halcyon/logout?return=${encodeURIComponent(`${base}/`)}`, cookies: { [c.name]: c.value } });
+  assert.equal(out.headers.location, `${base}/`);
+  assert.equal((await inject({ url: '/api/auth/state', cookies: { [c.name]: c.value } })).json().user, null);
+  const evil = await inject({ url: `/api/auth/halcyon/logout?return=${encodeURIComponent('https://evil.test/')}` });
+  assert.equal(evil.headers.location, '/?signedout=1');
+  assert.match(out.headers['content-security-policy'], new RegExp(`frame-ancestors 'self' ${base}`));
+});
+
 test('a mail of a shared space is noted in its mirror', async () => {
   spaces = [{ id: '8', name: 'Studio', members: [{ sub: '1', role: 'owner' }] }];
   await mirrorSpaces();

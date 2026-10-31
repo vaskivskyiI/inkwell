@@ -7,7 +7,8 @@ import { one, q } from './db/index.js';
 import { config } from './config.js';
 import { fail } from './util/http.js';
 import { logger } from './util/log.js';
-import { authenticate, createSession, createUser, setCookie } from './auth.js';
+import { COOKIE, authenticate, createSession, createUser, setCookie } from './auth.js';
+import { sha256 } from './util/crypto.js';
 import { postJson } from './integrations/halcyon.js';
 import { mirrorSpaces } from './mirror.js';
 
@@ -50,6 +51,17 @@ export default async function ssoRoutes(app) {
     const state = `${req.query.link ? 'link.' : ''}${crypto.randomBytes(24).toString('base64url')}`;
     reply.setCookie(STATE, state, { path: '/api/auth/halcyon', httpOnly: true, sameSite: 'lax', secure: config.secureCookies, maxAge: 300 });
     return reply.redirect(`${config.halcyonUrl}/api/sso/authorize?redirect_uri=${encodeURIComponent(callback(req))}&state=${encodeURIComponent(state)}`);
+  });
+
+  // Signing out of the suite from Halcyon: this app's session ends too, and the browser goes back there.
+  app.get('/api/auth/halcyon/logout', async (req, reply) => {
+    const back = String(req.query.return || '');
+    let origin = '';
+    try { origin = new URL(back).origin; } catch { /* no address */ }
+    const t = req.cookies?.[COOKIE];
+    if (t) await q('DELETE FROM sessions WHERE token_hash = $1', sha256(t));
+    reply.clearCookie(COOKIE, { path: '/' });
+    return reply.redirect(enabled() && origin === new URL(config.halcyonUrl).origin ? back : '/?signedout=1');
   });
 
   app.get('/api/auth/halcyon/callback', async (req, reply) => {

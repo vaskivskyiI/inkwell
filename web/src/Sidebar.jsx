@@ -1,3 +1,4 @@
+import { signOut } from './Rail.jsx';
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, LogOut, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass } from 'lucide-react';
 import { get, post, patch, del } from './api.js';
@@ -37,7 +38,6 @@ export function Sidebar() {
   const canEdit = all ? spaces.some((x) => ['owner', 'editor'].includes(x.role)) : ['owner', 'editor'].includes(space?.role);
   const activeId = route.name === 'n' ? route.id : null;
 
-  const logout = async () => { await post('/api/auth/logout'); location.hash = '#/'; location.reload(); };
   const close = () => { if (window.innerWidth < 800) store.set({ sidebar: false }); };
 
   return (
@@ -76,7 +76,7 @@ export function Sidebar() {
         <div className="me">
           <span className="avatar" style={{ background: user?.color }}>{user?.name?.[0]?.toUpperCase()}</span>
           <span className="grow ttl">{user?.name}</span>
-          <button className="icon small" onClick={logout} title="Sign out" aria-label="Sign out"><LogOut size={15} /></button>
+          <button className="icon small" onClick={() => signOut().catch(() => {})} title="Sign out" aria-label="Sign out"><LogOut size={15} /></button>
         </div>
       </div>
     </nav>
