@@ -1,6 +1,5 @@
-import { signOut } from './Rail.jsx';
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, LogOut, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass } from 'lucide-react';
+import { ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass } from 'lucide-react';
 import { get, post, patch, del } from './api.js';
 import { store, useStore, openNote, navigate, toast, toastError, localGet, localSet, currentSpace } from './store.js';
 import { forgetDoc, onEvent } from './data.js';
@@ -31,7 +30,6 @@ export function Sidebar() {
   const trees = useStore((s) => s.trees);
   const favorites = useStore((s) => s.favorites);
   const route = useStore((s) => s.route);
-  const user = useStore((s) => s.user);
   const halcyon = useStore((s) => s.halcyon);
   const space = spaces.find((s) => s.id === spaceId) || spaces[0];
   const all = spaceId === 'all';
@@ -73,11 +71,6 @@ export function Sidebar() {
 
       <div className="sidebar-foot">
         <a className={`nav-item${route.name === 'trash' ? ' on' : ''}`} href="#/trash"><Trash2 size={16} /> Trash</a>
-        <div className="me">
-          <span className="avatar" style={{ background: user?.color }}>{user?.name?.[0]?.toUpperCase()}</span>
-          <span className="grow ttl">{user?.name}</span>
-          <button className="icon small" onClick={() => signOut().catch(() => {})} title="Sign out" aria-label="Sign out"><LogOut size={15} /></button>
-        </div>
       </div>
     </nav>
   );
