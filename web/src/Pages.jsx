@@ -154,13 +154,17 @@ export function ReviewPage() {
   );
 }
 
+// Also the suite's Home (Halcyon) starting a page here: #/new?do=page | meeting | today (today's journal).
 export function NewFromItem({ query }) {
   const [error, setError] = useState(null);
   useEffect(() => {
-    const { kind, ref, title, space, ...rest } = query;
+    const { kind, ref, title, space, do: action, ...rest } = query;
     const meta = Object.fromEntries(Object.entries(rest).filter(([, v]) => v));
-    post('/api/notes/from-item', { kind, ref, title, meta, spaceId: space || currentSpace()?.id })
-      .then((n) => location.replace(`#/n/${n.id}`)) // replace: Back returns to where the user came from, not here
+    const d = new Date(), today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const made = action === 'today' ? post('/api/journal', { date: today })
+      : action === 'page' || action === 'meeting' ? post('/api/notes', { spaceId: space || currentSpace()?.id, kind: 'page', template: action === 'meeting' ? 'meeting' : undefined })
+        : post('/api/notes/from-item', { kind, ref, title, meta, spaceId: space || currentSpace()?.id });
+    made.then((n) => location.replace(`#/n/${n.id}`)) // replace: Back returns to where the user came from, not here
       .catch(setError);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (error) return <div className="empty-state"><h2>Could not create the note</h2><p>{error.message}</p><a href="#/">Go home</a></div>;
