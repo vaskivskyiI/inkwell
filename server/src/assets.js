@@ -87,18 +87,70 @@ function send(reply, a) {
   return reply.send(fs.createReadStream(fileOf(a.sha256)));
 }
 
+// Large files arrive in pieces (PUT /api/uploads/:id?offset=n): a proxy in front may cap the size of one request
+// (nginx's default is 1 MB), and a dropped connection only costs the current piece. The finished upload is then
+// named by its id in a JSON request to /api/assets or /api/import instead of a multipart body.
+const uploads = new Map(); // id → { userId, file, at }
+
+const uploadOf = (userId, id) => {
+  const u = uploads.get(id);
+  if (!u || u.userId !== userId) fail(404, 'Upload not found (it may have expired)');
+  return u;
+};
+const sizeOf = (file) => fsp.stat(file).then((s) => s.size, () => 0);
+
+/** The finished upload's temporary file, now the caller's to move or delete. */
+export async function takeUpload(userId, id, limit = Infinity) {
+  const u = uploadOf(userId, id);
+  uploads.delete(id);
+  const size = await sizeOf(u.file);
+  if (size > limit) { await fsp.unlink(u.file).catch(() => {}); fail(413, `Files can be at most ${Math.round(limit / 1048576)} MB`); }
+  return { file: u.file, size };
+}
+
 export default async function assetRoutes(app) {
+  // Raw pieces stream straight to disk (no body limit: they never sit in memory).
+  app.addContentTypeParser('application/octet-stream', (req, payload, done) => done(null, payload));
+
+  app.post('/api/uploads', async (req) => {
+    for (const [id, u] of uploads) if (now() - u.at > 864e5) { uploads.delete(id); fsp.unlink(u.file).catch(() => {}); }
+    const id = crypto.randomUUID(), file = await tempFile();
+    await fsp.writeFile(file, '');
+    uploads.set(id, { userId: req.user.id, file, at: now() });
+    return { id };
+  });
+  app.get('/api/uploads/:id', async (req) => ({ size: await sizeOf(uploadOf(req.user.id, req.params.id).file) }));
+  app.put('/api/uploads/:id', async (req, reply) => {
+    const u = uploadOf(req.user.id, req.params.id);
+    const size = await sizeOf(u.file);
+    // A piece that is not the next one (a retry after a lost answer, or a lost piece): say where to continue.
+    if (Number(req.query.offset) !== size) { req.body?.resume?.(); return reply.code(409).send({ error: 'Wrong offset', size }); }
+    u.at = now();
+    await pipeline(req.body, fs.createWriteStream(u.file, { flags: 'a' }));
+    return { size: await sizeOf(u.file) };
+  });
+
   app.post('/api/assets', async (req) => {
-    const part = await req.file({ limits: { fileSize: config.maxUpload } });
-    if (!part) fail(400, 'No file');
-    const fields = Object.fromEntries(Object.entries(part.fields).map(([k, v]) => [k, v?.value]));
+    let fields, upload;
+    if (req.isMultipart()) {
+      const part = await req.file({ limits: { fileSize: config.maxUpload } });
+      if (!part) fail(400, 'No file');
+      fields = { ...Object.fromEntries(Object.entries(part.fields).map(([k, v]) => [k, v?.value])), name: part.filename, mime: part.mimetype };
+      upload = { stream: part.file };
+    } else {
+      fields = req.body || {};
+      upload = uploadOf(req.user.id, fields.uploadId);
+    }
     let spaceId = fields.spaceId;
     const noteId = isUuid(fields.noteId) ? fields.noteId : null;
     if (noteId) spaceId = (await needNote(req.user.id, noteId, 'editor')).space_id;
     else await needSpace(req.user.id, spaceId, 'editor');
-    const saved = await saveStream(part.file);
-    if (part.file.truncated) { await fsp.unlink(saved.file).catch(() => {}); fail(413, `Files can be at most ${Math.round(config.maxUpload / 1048576)} MB`); }
-    const a = await storeAsset({ spaceId, noteId, userId: req.user.id, name: part.filename, mime: part.mimetype, file: saved.file, sha: saved.sha });
+    let saved;
+    if (upload.stream) {
+      saved = await saveStream(upload.stream);
+      if (upload.stream.truncated) { await fsp.unlink(saved.file).catch(() => {}); fail(413, `Files can be at most ${Math.round(config.maxUpload / 1048576)} MB`); }
+    } else saved = await takeUpload(req.user.id, fields.uploadId, config.maxUpload);
+    const a = await storeAsset({ spaceId, noteId, userId: req.user.id, name: fields.name, mime: fields.mime, file: saved.file, sha: saved.sha });
     return { id: a.id, url: `/api/assets/${a.id}`, name: a.name, mime: a.mime, size: a.size };
   });
 

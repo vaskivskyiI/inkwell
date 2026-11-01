@@ -49,6 +49,37 @@ test('uploads and imports have no size cap and stream to disk', async () => {
   assert.equal(img.rawPayload.length, pic.length);
 });
 
+test('files sent in pieces: resumable, owner only, then stored or imported by upload id', async () => {
+  const sid = space(ann, 'Work').id;
+  const put = (id, offset, data, who = ann) => app.inject({ method: 'PUT', url: `/api/uploads/${id}?offset=${offset}`, payload: data,
+    headers: { cookie: who.cookie, 'content-type': 'application/octet-stream' } });
+  const data = Buffer.alloc(3 * 1024 * 1024 + 5, 3);
+  data.write('tail!', data.length - 5);
+  const { id } = await ann.post('/api/uploads');
+  const piece = 1024 * 1024;
+  assert.equal((await put(id, 0, data.subarray(0, piece))).statusCode, 200);
+  // A repeated piece (its answer was lost) is refused with where to continue.
+  const again = await put(id, 0, data.subarray(0, piece));
+  assert.equal(again.statusCode, 409);
+  assert.equal(JSON.parse(again.body).size, piece);
+  assert.equal((await put(id, piece, data.subarray(piece, 2 * piece), bob)).statusCode, 404);
+  for (let off = piece; off < data.length; off += piece) assert.equal((await put(id, off, data.subarray(off, off + piece))).statusCode, 200);
+  assert.equal((await ann.get(`/api/uploads/${id}`)).size, data.length);
+  const a = await ann.post('/api/assets', { uploadId: id, name: 'pieces.bin', mime: 'application/octet-stream', spaceId: sid });
+  assert.equal(a.size, data.length);
+  const got = await app.inject({ method: 'GET', url: a.url, headers: { cookie: ann.cookie } });
+  assert.equal(got.rawPayload.subarray(-5).toString(), 'tail!');
+  assert.equal(await ann.status('GET', `/api/uploads/${id}`), 404); // used up
+
+  const zip = Buffer.from(zipSync({ 'Sent in pieces.md': strToU8('# Sent in pieces\n\nhello') }));
+  const up = await ann.post('/api/uploads');
+  assert.equal((await put(up.id, 0, zip)).statusCode, 200);
+  const r = await ann.post('/api/import', { uploadId: up.id, name: 'pieces.zip', spaceId: sid });
+  assert.equal(r.pages >= 1, true);
+  const { notes } = await ann.get(`/api/spaces/${sid}/tree`);
+  assert.ok(notes.some((n) => n.title === 'Sent in pieces'));
+});
+
 test('a page edited as Markdown keeps handwriting, makes callouts and page links, and notices a co-editor', async () => {
   const sid = space(ann, 'Work').id;
   const target = await ann.post('/api/notes', { spaceId: sid, title: 'Roadmap' });

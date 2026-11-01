@@ -13,9 +13,9 @@ import path from 'node:path';
 import * as Y from 'yjs';
 import { strFromU8 } from 'fflate';
 import { q } from '../db/index.js';
-import { fail } from '../util/http.js';
+import { fail, str } from '../util/http.js';
 import { createNote } from '../notes.js';
-import { storeAsset, saveStream, tempFile } from '../assets.js';
+import { storeAsset, saveStream, tempFile, takeUpload } from '../assets.js';
 import { openZip, isZipFile } from '../util/zip.js';
 import { persist } from '../collab.js';
 import { buildDoc, markdownToBlocks, encode } from '../docmodel.js';
@@ -433,13 +433,17 @@ export default async function importRoutes(app) {
   const { needSpace } = await import('../spaces.js');
   const { isUuid } = await import('../util/http.js');
   app.post('/api/import', async (req) => {
-    const part = await req.file({ limits: { fileSize: config.maxImport } });
-    if (!part) fail(400, 'No file');
-    const fields = Object.fromEntries(Object.entries(part.fields).map(([k, v]) => [k, v?.value]));
+    // A multipart body, or { uploadId, name, spaceId, parentId } for a file sent in pieces (/api/uploads).
+    let part = null, fields = req.body || {};
+    if (req.isMultipart()) {
+      part = await req.file({ limits: { fileSize: config.maxImport } });
+      if (!part) fail(400, 'No file');
+      fields = { ...Object.fromEntries(Object.entries(part.fields).map(([k, v]) => [k, v?.value])), name: part.filename };
+    }
     await needSpace(req.user.id, fields.spaceId, 'editor');
-    const { file } = await saveStream(part.file);
+    const { file } = part ? await saveStream(part.file) : await takeUpload(req.user.id, fields.uploadId, config.maxImport);
     try {
-      if (part.file.truncated) fail(413, `Imports can be at most ${Math.round(config.maxImport / 1048576)} MB`);
+      if (part?.file.truncated) fail(413, `Imports can be at most ${Math.round(config.maxImport / 1048576)} MB`);
       let parentId = null;
       if (isUuid(fields.parentId)) {
         const { needNote } = await import('../spaces.js');
@@ -447,7 +451,7 @@ export default async function importRoutes(app) {
         if (n.space_id !== fields.spaceId) fail(400, 'The parent page is in another space');
         parentId = n.id;
       }
-      return await importArchive(req.user.id, { spaceId: fields.spaceId, parentId, filename: part.filename || 'import', file });
+      return await importArchive(req.user.id, { spaceId: fields.spaceId, parentId, filename: str(fields.name, 300) || 'import', file });
     } finally { fs.promises.unlink(file).catch(() => {}); }
   });
 }

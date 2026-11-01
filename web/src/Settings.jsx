@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { User, Layers, Sparkles, PenLine, Plug, KeyRound, Shield, Trash2, Plus, Check, RefreshCw, Upload, Pencil } from 'lucide-react';
-import { get, post, put, patch, del, api } from './api.js';
+import { get, post, put, patch, del, sendFile } from './api.js';
 import { store, useStore, navigate, openNote, toast, toastError, localGet } from './store.js';
 import { loadSpaces, switchSpace, loadTree } from './data.js';
 import { setTheme } from './theme.js';
@@ -521,18 +521,18 @@ function Import() {
   const spaceId = spaces.some((s) => s.id === chosen) ? chosen : spaces.some((s) => s.id === current) ? current : spaces[0]?.id;
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(null);
   const [result, setResult] = useState(null);
   const run = async () => {
     setBusy(true); setResult(null);
     try {
-      const fd = new FormData();
-      fd.append('spaceId', spaceId);
-      fd.append('file', file, file.name);
-      const r = await api('POST', '/api/import', fd);
+      const uploadId = await sendFile(file, { onProgress: setSent });
+      setSent(null);
+      const r = await post('/api/import', { uploadId, name: file.name, spaceId });
       setResult(r);
       await loadTree(spaceId);
       toast(`Imported ${r.pages} page${r.pages === 1 ? '' : 's'}`);
-    } catch (e) { toastError(e); } finally { setBusy(false); }
+    } catch (e) { toastError(e); } finally { setBusy(false); setSent(null); }
   };
   return (
     <>
@@ -553,7 +553,7 @@ function Import() {
       <Field label="File" hint="Everything lands under one new page “Imported from …”, which you can move or rename afterwards.">
         <input type="file" accept=".one,.onepkg,.affine,.zip,.md,.markdown" onChange={(e) => setFile(e.target.files[0] || null)} />
       </Field>
-      <button className="primary" disabled={!file || !spaceId || busy} onClick={run}>{busy ? <><span className="spinner" /> Importing…</> : <><Upload size={15} /> Import</>}</button>
+      <button className="primary" disabled={!file || !spaceId || busy} onClick={run}>{busy ? <><span className="spinner" /> {sent != null ? `Uploading ${Math.floor(sent * 100)}%…` : 'Importing…'}</> : <><Upload size={15} /> Import</>}</button>
       {result && (
         <div className="banner">
           <Check size={16} /> {result.pages} pages and {result.assets} files imported.
