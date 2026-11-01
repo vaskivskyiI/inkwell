@@ -432,7 +432,7 @@ function Import() {
       <h2>Import</h2>
       <h3>From AFFiNE</h3>
       <ol className="hint">
-        <li>In AFFiNE export the workspace (or a doc) as a <b>Snapshot</b> and save the <code>.zip</code> — it contains <code>*.snapshot.json</code> files and an <code>assets</code> folder.</li>
+        <li>In AFFiNE export the workspace and choose the <code>.affine</code> file below. A <b>Snapshot</b> <code>.zip</code> of a workspace or a doc works too.</li>
         <li>Choose it below. Headings, lists, to-dos, tables, code, callouts, images, files, links between docs and pen strokes from edgeless canvases are kept;
           docs embedded as linked cards become sub-pages. Database views arrive as plain lists; edgeless shapes are skipped.</li>
       </ol>
@@ -442,7 +442,7 @@ function Import() {
         <select value={spaceId} onChange={(e) => setSpaceId(e.target.value)}>{spaces.map((s) => <option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}</select>
       </Field>
       <Field label="File" hint="Everything lands under one new page “Imported from …”, which you can move or rename afterwards.">
-        <input type="file" accept=".zip,.md,.markdown" onChange={(e) => setFile(e.target.files[0] || null)} />
+        <input type="file" accept=".affine,.zip,.md,.markdown" onChange={(e) => setFile(e.target.files[0] || null)} />
       </Field>
       <button className="primary" disabled={!file || !spaceId || busy} onClick={run}>{busy ? <><span className="spinner" /> Importing…</> : <><Upload size={15} /> Import</>}</button>
       {result && (

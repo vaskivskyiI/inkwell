@@ -3,7 +3,7 @@
 import * as Y from 'yjs';
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider';
 import { IndexeddbPersistence } from 'y-indexeddb';
-import { get } from './api.js';
+import { get, patch } from './api.js';
 import { store, setTree, patchNote, removeNotes, localSet, toast } from './store.js';
 
 const wsUrl = (path) => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`;
@@ -107,4 +107,12 @@ export function openDoc(noteId, user) {
 /** Removes a deleted page's offline copy. */
 export function forgetDoc(noteId) {
   try { indexedDB.deleteDatabase(`inkwell-note-${noteId}`); } catch { /* ignore */ }
+}
+
+/** Moves a page and its sub-pages; pages put in a space with other people need a yes first. */
+export async function moveToSpace(id, space, place = {}) {
+  if (space.members > 1 && !window.confirm(`Move this page and its sub-pages to “${space.name}”? Its ${space.members} members will see them.`)) return false;
+  await patch(`/api/notes/${id}`, { ...place, spaceId: space.id });
+  toast(`Moved to ${space.name}`);
+  return true;
 }

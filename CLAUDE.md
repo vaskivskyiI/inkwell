@@ -15,7 +15,7 @@ Halcyon's MCP endpoint). Browser first; native Windows/Android apps later use th
   - `src/docmodel.js` Y.Doc ↔ Markdown/text, Markdown → editor JSON · `src/html.js` export/public HTML · `src/ink/` stroke geometry + SVG/PNG render
   - `src/notes.js` tree/trash/journal/templates/versions/export · `src/spaces.js` roles · `src/auth.js` sessions + API tokens · `src/assets.js`
   - `src/ai/` providers, router (per task: chat / vision / embed; local-only spaces), models (what listed models suit, suggestions), queue (SKIP LOCKED), tasks (analyze, ink, image, embed), assistant, prompts
-  - `src/importers/` AFFiNE snapshot zip + Markdown/Notion/Obsidian import (`POST /api/import`)
+  - `src/importers/` AFFiNE `.affine` file + snapshot zip + Markdown/Notion/Obsidian import (`POST /api/import`)
   - `src/search.js` FTS + embeddings (RRF) · `src/links.js` page links + reverse lookup · `src/integrations/halcyon.js` MCP client
 - `web/` React 19 + Vite, TipTap 3, no UI library. `src/store.js` tiny global store + hash routing; `src/data.js` loading, events socket, `openDoc()` (Hocuspocus + IndexedDB)
   - `src/editor/` TipTap setup, custom nodes (inkBlock, callout, pageMention), slash menu, selection AI · `src/ink/` InkCanvas, toolbar, JournalView
@@ -24,7 +24,7 @@ Halcyon's MCP endpoint). Browser first; native Windows/Android apps later use th
 ## Commands
 ```bash
 npm install && npm run build && npm start      # :8080 (on this Windows box 8080 is reserved — use INKWELL_PORT=8090)
-npm test                                      # 66 tests, in-memory PGlite, mock AI, real WebSockets
+npm test                                      # 69 tests, in-memory PGlite, mock AI, real WebSockets
 npm run test:pg -w server                     # API + AI tests via the pg driver
 ./deploy/podman-pod.sh up [--with-ollama]
 ```

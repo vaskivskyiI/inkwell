@@ -1,4 +1,5 @@
 // Imports from other notes apps:
+//  • AFFiNE workspace export (`.affine`, a SQLite database; see affine-file.js), read into the shape of a Snapshot.
 //  • AFFiNE "Snapshot" export (`<collection>.bs.zip`): one `<title>-<id>.snapshot.json` per doc (a BlockSuite block tree)
 //    plus `assets/<blobId>.<ext>`. Keeps headings, nested lists, to-dos, code, tables, callouts, quotes, images,
 //    attachments, links between docs (as page mentions and as sub-pages) and edgeless pen strokes (as an ink block).
@@ -18,6 +19,7 @@ import { buildDoc, markdownToBlocks, encode } from '../docmodel.js';
 import { CANVAS_WIDTH } from '../ink/geometry.js';
 import { publish } from '../events.js';
 import { logger } from '../util/log.js';
+import { isSqlite, readAffineFile } from './affine-file.js';
 
 const log = logger('import');
 const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', avif: 'image/avif',
@@ -38,20 +40,29 @@ function readArchive(filename, data) {
 
 /** Entry point: returns { pages, assets, rootId, format, notes: [...warnings] }. */
 export async function importArchive(userId, { spaceId, parentId = null, filename = 'import', data }) {
-  const files = readArchive(filename, data);
   const ctx = { userId, spaceId, stats: { pages: 0, assets: 0 }, warnings: [] };
+  const finish = (format, root) => {
+    publish(spaceId, 'tree:changed', {});
+    log.info(`${format} import into ${spaceId}: ${ctx.stats.pages} pages, ${ctx.stats.assets} files`);
+    return { format, rootId: root, pages: ctx.stats.pages, assets: ctx.stats.assets, warnings: [...new Set(ctx.warnings)].slice(0, 20) };
+  };
+  const newRoot = async (label) => parentId || (await createNote(userId, { spaceId, title: `${label} ${new Date().toISOString().slice(0, 10)}`, icon: '📥' })).id;
+  if (isSqlite(data)) {
+    const { snaps, assets } = await readAffineFile(data, ctx.warnings);
+    ctx.rootId = await newRoot('Imported from AFFiNE');
+    await importSnapshots(ctx, snaps, assets);
+    return finish('affine', ctx.rootId);
+  }
+  const files = readArchive(filename, data);
   const snapshots = files.filter((f) => f.name.endsWith('.snapshot.json'));
   const markdown = files.filter((f) => /\.(md|markdown)$/i.test(f.name));
-  if (!snapshots.length && !markdown.length) fail(400, 'Nothing to import — expected an AFFiNE snapshot export (.zip with *.snapshot.json) or Markdown files');
+  if (!snapshots.length && !markdown.length) fail(400, 'Nothing to import — expected an AFFiNE export (.affine, or .zip with *.snapshot.json) or Markdown files');
   const format = snapshots.length ? 'affine' : 'markdown';
   const label = format === 'affine' ? 'Imported from AFFiNE' : `Imported ${path.basename(filename).replace(/\.(zip|md|markdown)$/i, '')}`;
-  const root = parentId || (await createNote(userId, { spaceId, title: `${label} ${new Date().toISOString().slice(0, 10)}`, icon: '📥' })).id;
-  ctx.rootId = root;
+  ctx.rootId = await newRoot(label);
   if (format === 'affine') await importAffine(ctx, snapshots, files);
   else await importMarkdown(ctx, markdown, files);
-  publish(spaceId, 'tree:changed', {});
-  log.info(`${format} import into ${spaceId}: ${ctx.stats.pages} pages, ${ctx.stats.assets} files`);
-  return { format, rootId: root, pages: ctx.stats.pages, assets: ctx.stats.assets, warnings: [...new Set(ctx.warnings)].slice(0, 20) };
+  return finish(format, ctx.rootId);
 }
 
 async function fillPage(ctx, noteId, { title, blocks, ink, createdAt }) {
@@ -243,8 +254,6 @@ function brushesToInk(brushes) {
 }
 
 async function importAffine(ctx, snapshotFiles, files) {
-  ctx.assets = new Map(files.filter((f) => /(^|\/)assets\//.test(f.name)).map((f) => [path.basename(f.name).replace(/\.[^.]+$/, ''), f]));
-  ctx.assetCache = new Map();
   const snaps = [];
   for (const f of snapshotFiles) {
     try {
@@ -252,6 +261,12 @@ async function importAffine(ctx, snapshotFiles, files) {
       if (s?.blocks && s?.meta?.id) snaps.push(s);
     } catch { ctx.warnings.push(`Could not read ${f.name}`); }
   }
+  await importSnapshots(ctx, snaps, new Map(files.filter((f) => /(^|\/)assets\//.test(f.name)).map((f) => [path.basename(f.name).replace(/\.[^.]+$/, ''), f])));
+}
+
+async function importSnapshots(ctx, snaps, assets) {
+  ctx.assets = assets;
+  ctx.assetCache = new Map();
   const byId = new Map(snaps.map((s) => [s.meta.id, s]));
   // Docs embedded as linked cards inside another doc become its sub-pages (like AFFiNE's sidebar shows them).
   const parent = new Map();

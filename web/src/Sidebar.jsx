@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass } from 'lucide-react';
+import { FolderInput, ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass } from 'lucide-react';
 import { get, post, patch, del } from './api.js';
 import { store, useStore, openNote, navigate, toast, toastError, localGet, localSet, currentSpace } from './store.js';
-import { forgetDoc, onEvent } from './data.js';
+import { forgetDoc, onEvent, moveToSpace } from './data.js';
 import { Menu } from './ui/Menu.jsx';
 
 const expandedSet = new Set(JSON.parse(localGet('expanded') || '[]'));
@@ -149,12 +149,16 @@ function TreeNode({ note, childrenMap, depth, activeId, canEdit }) {
     dragId = null;
     if (!id || id === note.id) return;
     try {
-      if (where === 'inside') { await patch(`/api/notes/${id}`, { parentId: note.id }); expandedSet.add(note.id); saveExpanded(); setOpen(true); }
+      // Dropped on a page of another space: the page moves there.
+      const space = store.get().spaces.find((s) => s.id === note.spaceId);
+      const from = Object.entries(store.get().trees).find(([, t]) => t.some((n) => n.id === id))?.[0];
+      const place = (fields) => (from && from !== note.spaceId ? moveToSpace(id, space, fields) : patch(`/api/notes/${id}`, fields));
+      if (where === 'inside') { await place({ parentId: note.id }); expandedSet.add(note.id); saveExpanded(); setOpen(true); }
       else {
         const siblings = childrenMap.get(note.parentId || 'root') || [];
         const i = siblings.findIndex((s) => s.id === note.id);
         const afterId = where === 'after' ? note.id : (siblings[i - 1]?.id === id ? siblings[i - 2]?.id : siblings[i - 1]?.id) ?? null;
-        await patch(`/api/notes/${id}`, { parentId: note.parentId, afterId });
+        await place({ parentId: note.parentId, afterId });
       }
     } catch (err) { toastError(err); }
   };
@@ -163,6 +167,7 @@ function TreeNode({ note, childrenMap, depth, activeId, canEdit }) {
     { label: 'Add sub-page', icon: Plus, onClick: () => newPage({ parentId: note.id }) },
     { label: 'Add sub-journal (handwriting)', icon: PenLine, onClick: () => newPage({ parentId: note.id, kind: 'journal' }) },
     { label: 'Duplicate', icon: Copy, onClick: async () => openNote((await post(`/api/notes/${note.id}/duplicate`)).id) },
+    { label: 'Move to space…', icon: FolderInput, hidden: !canEdit, submenu: store.get().spaces.filter((s) => s.id !== note.spaceId && ['owner', 'editor'].includes(s.role)).map((s) => ({ label: `${s.icon} ${s.name}`, onClick: () => moveToSpace(note.id, s).catch(toastError) })) },
     { label: 'Move to trash', icon: Trash2, danger: true, onClick: async () => { await del(`/api/notes/${note.id}`); forgetDoc(note.id); toast('Moved to the trash', { action: { label: 'Undo', onClick: () => post(`/api/notes/${note.id}/restore`) } }); if (activeId === note.id) navigate('#/'); } },
   ];
   return (

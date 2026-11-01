@@ -224,3 +224,26 @@ test('admin: add and edit users', async () => {
   await ann.patch(`/api/admin/users/${ann.user.id}`, { password: 'secret123' });
   await ann.get('/api/me'); // the admin's own session survives their own reset
 });
+
+test('a page moves to a shared space with its sub-pages, files and into a chosen parent', async () => {
+  const from = ann.spaces.find((s) => s.name === 'Private').id;
+  const team = await ann.post('/api/spaces', { name: 'Team' });
+  await ann.post(`/api/spaces/${team.id}/members`, { email: bob.user.email, role: 'viewer' });
+  const parent = await ann.post('/api/notes', { spaceId: team.id, title: 'Projects' });
+  const p = await ann.post('/api/notes', { spaceId: from, title: 'Moving' });
+  const kid = await ann.post('/api/notes', { spaceId: from, parentId: p.id, title: 'Sub' });
+  assert.equal(await bob.status('GET', `/api/notes/${p.id}`), 404);
+  const moved = await ann.patch(`/api/notes/${p.id}`, { spaceId: team.id, parentId: parent.id });
+  assert.deepEqual([moved.spaceId, moved.parentId], [team.id, parent.id]);
+  assert.equal((await ann.get(`/api/notes/${kid.id}`)).spaceId, team.id);
+  assert.equal((await bob.get(`/api/notes/${kid.id}`)).title, 'Sub');
+  assert.equal(await bob.status('PATCH', `/api/notes/${p.id}`, { spaceId: from }), 403);
+  assert.equal(await ann.status('PATCH', `/api/notes/${p.id}`, { spaceId: from, parentId: parent.id }), 400);
+
+  // Today's journal in both spaces: the moved one stays, as an ordinary page.
+  const j1 = await ann.post('/api/journal', { spaceId: from });
+  const j2 = await ann.post('/api/journal', { spaceId: team.id });
+  await ann.patch(`/api/notes/${j1.id}`, { spaceId: team.id });
+  assert.equal((await ann.get(`/api/notes/${j1.id}`)).spaceId, team.id);
+  assert.equal((await ann.post('/api/journal', { spaceId: team.id })).id, j2.id);
+});

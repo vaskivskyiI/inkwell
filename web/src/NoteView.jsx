@@ -3,7 +3,7 @@ import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Do
 import { toggleFullscreen, toggleCanvasFullscreen, pageCanvas } from './ui/fullscreen.js';
 import { get, post, put, patch, del } from './api.js';
 import { store, useStore, findNote, openNote, navigate, toast, toastError, localSet } from './store.js';
-import { openDoc, onEvent, loadFavorites, forgetDoc } from './data.js';
+import { openDoc, onEvent, loadFavorites, forgetDoc, moveToSpace } from './data.js';
 import { PageEditor } from './editor/Editor.jsx';
 import { JournalView } from './ink/JournalView.jsx';
 import { useYText } from './ui/ytext.js';
@@ -52,7 +52,11 @@ export function NoteView({ id }) {
       }
       if (m.type === 'note:links' && m.noteId === id) loadDetail().catch(() => {});
       if (m.type === 'note:updated' && m.note?.id === id && m.note.updatedAt) setDetail((d) => d && { ...d, updatedAt: m.note.updatedAt });
-      if (m.type === 'note:removed' && m.ids.includes(id)) { toast('This page was moved to the trash'); navigate('#/'); }
+      if (m.type === 'note:removed' && m.ids.includes(id)) {
+        // Moved, and still ours to see: only its space changed.
+        if (m.movedTo && store.get().spaces.some((s) => s.id === m.movedTo)) setDetail((d) => ({ ...d, spaceId: m.movedTo }));
+        else { toast(m.movedTo ? 'This page was moved to a space you are not in' : 'This page was moved to the trash'); navigate('#/'); }
+      }
     });
     const onComment = (e) => { store.set({ panel: 'comments', commentQuote: e.detail?.quote || '' }); localSet('panel', 'comments'); };
     window.addEventListener('inkwell:comment', onComment);
@@ -146,7 +150,7 @@ function NoteHeader({ detail, setDetail, handle, readOnly, wide }) {
     { label: 'Add sub-page', icon: FilePlus2, onClick: () => child('page'), hidden: readOnly },
     { label: 'Add sub-journal (handwriting)', icon: BookOpen, onClick: () => child('journal'), hidden: readOnly },
     { label: 'Duplicate', icon: Copy, onClick: async () => openNote((await post(`/api/notes/${detail.id}/duplicate`)).id), hidden: readOnly },
-    { label: 'Move to space…', icon: FolderInput, hidden: readOnly, submenu: spaces.filter((s) => s.id !== detail.spaceId && ['owner', 'editor'].includes(s.role)).map((s) => ({ label: `${s.icon} ${s.name}`, onClick: async () => { await patch(`/api/notes/${detail.id}`, { spaceId: s.id }); store.set({ spaceId: s.id }); setDetail((d) => ({ ...d, spaceId: s.id })); toast(`Moved to ${s.name}`); } })) },
+    { label: 'Move to space…', icon: FolderInput, hidden: readOnly, submenu: spaces.filter((s) => s.id !== detail.spaceId && ['owner', 'editor'].includes(s.role)).map((s) => ({ label: `${s.icon} ${s.name}`, onClick: () => moveToSpace(detail.id, s).then((moved) => { if (moved) store.set({ spaceId: s.id }); }).catch(toastError) })) },
     { label: 'Export as Markdown', icon: Download, onClick: () => { location.href = `/api/notes/${detail.id}/export`; } },
     { label: 'Export as HTML', icon: Download, onClick: () => { location.href = `/api/notes/${detail.id}/export?format=html`; } },
     { label: detail.publicSlug ? 'Public link…' : 'Share public link…', icon: Globe, hidden: readOnly, onClick: async () => {

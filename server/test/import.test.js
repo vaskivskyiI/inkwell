@@ -1,6 +1,7 @@
 // Importing an AFFiNE snapshot export and a Notion-style Markdown zip.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import * as Y from 'yjs';
 import { zipSync, strToU8 } from 'fflate';
 import { startServer, signup } from './helpers.js';
 
@@ -114,4 +115,76 @@ test('import needs editor access and something importable', async () => {
   assert.equal(r.statusCode, 404);
   const bad = await app.inject({ method: 'POST', url: '/api/import', payload: `--x\r\nContent-Disposition: form-data; name="spaceId"\r\n\r\n${ann.spaces[0].id}\r\n--x\r\nContent-Disposition: form-data; name="file"; filename="a.zip"\r\n\r\n${zipSync({ 'x.txt': strToU8('x') }).toString()}\r\n--x--\r\n`, headers: { cookie: ann.cookie, 'content-type': 'multipart/form-data; boundary=x' } });
   assert.equal(bad.statusCode, 400);
+});
+
+test('.affine workspace files, old and new layout', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+  const page = (title) => {
+    const d = new Y.Doc(), blocks = d.getMap('blocks');
+    const block = (id, flavour, props = {}, children = []) => {
+      const b = new Y.Map();
+      blocks.set(id, b);
+      b.set('sys:id', id); b.set('sys:flavour', flavour);
+      const kids = new Y.Array(); kids.push(children); b.set('sys:children', kids);
+      for (const [k, v] of Object.entries(props)) b.set(`prop:${k}`, v);
+    };
+    const text = (s, attrs) => { const t = new Y.Text(); d.transact(() => t.applyDelta([{ insert: s, attributes: attrs }])); return t; };
+    d.transact(() => {
+      block('p', 'affine:page', { title: text(title) }, ['n']);
+      block('n', 'affine:note', {}, ['h', 'l', 'i', 't', 'r']);
+      block('h', 'affine:paragraph', { type: 'h2', text: text('Heading') });
+      block('l', 'affine:list', { type: 'todo', checked: true, text: text('Done item', { bold: true }) });
+      block('i', 'affine:image', { sourceId: 'blob1', caption: 'A picture' });
+      block('t', 'affine:table', { 'rows.r1.rowId': 'r1', 'rows.r1.order': 'a', 'columns.c1.columnId': 'c1', 'columns.c1.order': 'a', 'cells.r1:c1.text': text('Cell text') });
+      block('r', 'affine:embed-linked-doc', { pageId: 'second' });
+    });
+    return Y.encodeStateAsUpdate(d);
+  };
+  const rootDoc = () => {
+    const d = new Y.Doc(), pages = new Y.Array();
+    d.getMap('meta').set('pages', pages);
+    for (const [id, title, trash] of [['first', 'First'], ['second', 'Second'], ['gone', 'Gone', true]]) {
+      const m = new Y.Map();
+      pages.push([m]);
+      m.set('id', id); m.set('title', title); m.set('createDate', 1700000000000);
+      if (trash) m.set('trash', true);
+    }
+    return Y.encodeStateAsUpdate(d);
+  };
+  const space = ann.spaces.find((s) => s.name === 'Private').id;
+  const build = (fill) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'affine-test-')), file = path.join(dir, 'w.affine');
+    const db = new DatabaseSync(file);
+    fill(db);
+    db.close();
+    const data = fs.readFileSync(file);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return data;
+  };
+  const v2 = build((db) => {
+    db.exec('CREATE TABLE snapshots (doc_id TEXT PRIMARY KEY, data BLOB, updated_at TEXT); CREATE TABLE updates (doc_id TEXT, created_at TEXT, data BLOB); CREATE TABLE blobs (key TEXT PRIMARY KEY, data BLOB, mime TEXT, size INT, deleted_at TEXT);');
+    const s = db.prepare('INSERT INTO snapshots VALUES (?, ?, 0)');
+    s.run('workspace1', rootDoc()); s.run('first', page('First')); s.run('second', page('Second'));
+    db.prepare("INSERT INTO blobs VALUES ('blob1', ?, 'image/png', 10, NULL)").run(PNG);
+  });
+  const v1 = build((db) => {
+    db.exec('CREATE TABLE updates (id INTEGER PRIMARY KEY AUTOINCREMENT, data BLOB NOT NULL, timestamp TEXT, doc_id TEXT); CREATE TABLE blobs (key TEXT PRIMARY KEY, data BLOB NOT NULL, timestamp TEXT);');
+    const u = db.prepare('INSERT INTO updates (data, doc_id) VALUES (?, ?)');
+    u.run(rootDoc(), null); u.run(page('First'), 'first'); u.run(page('Second'), 'second');
+    db.prepare("INSERT INTO blobs (key, data) VALUES ('blob1', ?)").run(PNG);
+  });
+  for (const data of [v2, v1]) {
+    const r = await upload(ann, 'workspace.affine', data, { spaceId: space });
+    assert.equal(r.format, 'affine');
+    assert.equal(r.pages, 2);
+    assert.equal(r.assets, 2, 'the picture on each page');
+    assert.match(r.warnings.join(), /1 page\(s\) in AFFiNE's trash/);
+    const { notes: tree } = await ann.get(`/api/spaces/${space}/tree`);
+    const first = tree.find((n) => n.title === 'First' && n.parentId === r.rootId);
+    const md = await ann.get(`/api/notes/${first.id}/export`);
+    for (const re of [/## Heading/, /- \[x\] \*\*Done item\*\*/, /Cell text/, /\/api\/assets\//, /Second/]) assert.match(md, re);
+    assert.ok(tree.some((n) => n.title === 'Second' && n.parentId === first.id), 'a linked card makes a sub-page');
+  }
+  await assert.rejects(upload(ann, 'other.affine', build((db) => db.exec('CREATE TABLE x (a)')), { spaceId: space }), /not an AFFiNE workspace/);
 });

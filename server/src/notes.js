@@ -148,11 +148,19 @@ export default async function noteRoutes(app) {
       await needNote(req.user.id, n.id, 'editor');
       await needSpace(req.user.id, b.spaceId, 'editor');
       const ids = await descendants(n.id);
+      const parentId = isUuid(b.parentId) ? b.parentId : null;
+      if (parentId) {
+        const p = await one('SELECT space_id FROM notes WHERE id = $1 AND deleted_at IS NULL', parentId);
+        if (!p || p.space_id !== b.spaceId) fail(400, 'The parent page is not in that space');
+      }
       await tx(async () => {
-        await q('UPDATE notes SET space_id = $2, parent_id = NULL, position = $3 WHERE id = $1', n.id, b.spaceId, await positionFor(b.spaceId, null, undefined));
+        // A space has one journal page per day: one that would clash becomes an ordinary dated page.
+        await q(`UPDATE notes m SET journal_date = NULL WHERE m.id = ANY($1::uuid[]) AND m.journal_date IS NOT NULL AND EXISTS (
+          SELECT 1 FROM notes o WHERE o.space_id = $2 AND o.journal_date = m.journal_date AND o.deleted_at IS NULL)`, ids, b.spaceId);
+        await q('UPDATE notes SET space_id = $2, parent_id = $3, position = $4 WHERE id = $1', n.id, b.spaceId, parentId, await positionFor(b.spaceId, parentId, b.afterId === null || isUuid(b.afterId) ? b.afterId : undefined));
         await q('UPDATE notes SET space_id = $2 WHERE id = ANY($1::uuid[])', ids, b.spaceId);
       });
-      publish(n.space_id, 'note:removed', { ids });
+      publish(n.space_id, 'note:removed', { ids, movedTo: b.spaceId });
       publish(b.spaceId, 'tree:changed', {});
     } else if (b.parentId !== undefined || b.afterId !== undefined) {
       const parentId = isUuid(b.parentId) ? b.parentId : null;
