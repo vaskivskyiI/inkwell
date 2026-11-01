@@ -75,16 +75,63 @@ export async function resolve(userId, task, { spaceId } = {}) {
 }
 const out = (p, model) => ({ provider: instance(p), model, name: p.name, type: p.type, local: isLocalEndpoint(p.type, p.baseUrl) });
 
+// What models send instead of JSON: thinking first, fences, prose around it, LaTeX backslashes and raw line breaks in
+// strings, or an answer cut off at the token limit. Each is mended before giving up.
 export function parseJson(text) {
-  const s = String(text || '').replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
-  try { return JSON.parse(s); } catch { /* fall through */ }
+  const s = String(text || '').replace(/<think>[\s\S]*?(<\/think>|$)/g, '').replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, '').trim();
+  const tries = [s];
   const a = s.indexOf('{'), b = s.lastIndexOf('}');
-  if (a >= 0 && b > a) { try { return JSON.parse(s.slice(a, b + 1)); } catch { /* fall through */ } }
+  if (a >= 0) tries.push(b > a ? s.slice(a, b + 1) : s.slice(a), s.slice(a));
+  for (const t of tries) {
+    for (const x of [t, mendJson(t)]) {
+      try { const v = JSON.parse(x); if (v && typeof v === 'object') return Array.isArray(v) ? { items: v } : v; } catch { /* next */ }
+    }
+  }
   throw new Error('The model did not return valid JSON');
 }
 
-/** One JSON answer from the chat (or vision) model. */
-export async function askJson(r, { system, user, images, maxTokens = 1500 }) {
-  const out = await r.provider.chat({ model: r.model, system, messages: [{ role: 'user', content: user, images }], json: true, temperature: 0.1, maxTokens });
-  return parseJson(out.text);
+/** Escapes what is not allowed inside strings and closes what a cut-off answer left open. */
+function mendJson(t) {
+  let out = '', inStr = false;
+  const open = [];
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inStr) {
+      if (c === '\\') {
+        const n = t[i + 1];
+        if (n && '"\\/bfnrt'.includes(n)) { out += c + n; i++; }
+        else if (n === 'u' && /^[0-9a-f]{4}$/i.test(t.slice(i + 2, i + 6))) { out += t.slice(i, i + 6); i += 5; }
+        else out += '\\\\'; // \alpha, \sum, \( …: a literal backslash
+      } else if (c === '"') { inStr = false; out += c; }
+      else if (c === '\n') out += '\\n';
+      else if (c === '\r') out += '\\r';
+      else if (c === '\t') out += '\\t';
+      else if (c < ' ') out += ' ';
+      else out += c;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{' || c === '[') open.push(c === '{' ? '}' : ']');
+    else if (c === '}' || c === ']') open.pop();
+    out += c;
+  }
+  if (inStr) out += '"';
+  out = out.replace(/,\s*$/, '').replace(/,(\s*[}\]])/g, '$1').replace(/:\s*$/, ': null');
+  return out + open.reverse().join('');
+}
+
+/**
+ * One JSON answer from the chat (or vision) model. A model that still answers otherwise is asked once more, with room
+ * for a longer answer; `fallback` turns a plain-text answer into a usable one (a transcription is useful as text too).
+ */
+export async function askJson(r, { system, user, images, maxTokens = 1500, fallback }) {
+  const ask = (sys, max) => r.provider.chat({ model: r.model, system: sys, messages: [{ role: 'user', content: user, images }], json: true, temperature: 0.1, maxTokens: max });
+  const first = await ask(system, maxTokens);
+  try { return parseJson(first.text); } catch { /* ask again */ }
+  const again = await ask(`${system}\n\nAnswer with one JSON object only: no text before or after it, no code fences. Write a backslash inside a string as \\\\.`, maxTokens * 2);
+  try { return parseJson(again.text); } catch (e) {
+    const prose = String(again.text || first.text || '').replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim();
+    if (fallback && prose) return fallback(prose);
+    throw e;
+  }
 }

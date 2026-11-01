@@ -195,7 +195,9 @@ function Today({ highlight }) {
       }
     };
     const sp = filterSpace() ? `?space=${filterSpace()}` : '';
-    load('events', `/api/halcyon/events${sp}`, 'event');
+    // The day as it is here: the server may keep another time zone.
+    const start = new Date(new Date().toDateString()), end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1);
+    load('events', `/api/halcyon/events?date=${localDay(start)}&from=${start.toISOString()}&to=${end.toISOString()}${sp && `&${sp.slice(1)}`}`, 'event');
     load('tasks', `/api/halcyon/tasks${sp}`, 'task');
     load('mail', `/api/halcyon/open-items${sp}`, 'email');
   }, []);

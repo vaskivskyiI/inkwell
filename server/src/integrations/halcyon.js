@@ -66,12 +66,17 @@ export async function tryEach(list, id, fn) {
   throw failure;
 }
 
-// One mailbox that fails must not hide the others.
+// One mailbox that fails must not hide the others. Several mailboxes can return the same row (the own mailbox also
+// lists what it shares with a shared one; a pasted connection may reach the same account): each item is kept once.
 async function fromEach(list, fn) {
   const all = await Promise.allSettled(list.map(fn));
   const good = all.filter((r) => r.status === 'fulfilled');
   if (!good.length && all.length) throw all[0].reason;
-  return good.flatMap((r) => r.value);
+  const seen = new Set();
+  return good.flatMap((r) => r.value).filter((it) => {
+    const k = `${it.kind}|${it.ref}|${it.title}|${it.date || ''}`;
+    return !seen.has(k) && seen.add(k);
+  });
 }
 
 // Halcyon behind a private certificate authority or with a self-signed certificate: its CA (PEM) is added to Node's
@@ -169,13 +174,25 @@ export async function searchHalcyon(userId, kind, query) {
 }
 
 /** Today's (or a day's) meetings, for "New meeting note". */
-export async function eventsOn(userId, date, spaceId) {
+/**
+ * A day's meetings. `from`/`to` are the bounds of that day where the person is (the browser knows; the server may run
+ * in UTC). Halcyon keeps all-day events as UTC dates and also lists events that end exactly where the range starts, so
+ * all-day events are matched by date and timed ones must really overlap the day.
+ */
+export async function eventsOn(userId, date, spaceId, bounds = {}) {
   const scopes = await scopesFor(userId, spaceId);
-  const d = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? new Date(`${date}T00:00:00`) : new Date(new Date().toDateString());
-  const to = new Date(d.getTime() + 864e5);
-  const events = await fromEach(scopes, async ({ conn, label }) => (await call(conn, 'list_events', { from: d.toISOString(), to: to.toISOString(), ...spaceArg(label) }) || []).map((e) => fromConn(conn, scopes.length > 1, eventOut(e))));
-  return events.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : localDay(new Date());
+  let from = Date.parse(bounds.from), to = Date.parse(bounds.to);
+  if (!(from < to && to - from <= 2 * 864e5)) { from = new Date(`${day}T00:00:00`).getTime(); to = from + 864e5; }
+  const range = { from: new Date(Math.min(from, Date.parse(`${day}T00:00:00Z`)) - 864e5).toISOString(), to: new Date(Math.max(to, Date.parse(`${day}T00:00:00Z`) + 864e5) + 864e5).toISOString() };
+  const events = await fromEach(scopes, async ({ conn, label }) => (await call(conn, 'list_events', { ...range, ...spaceArg(label) }) || []).map((e) => fromConn(conn, scopes.length > 1, eventOut(e))));
+  return events.filter(({ meta: m }) => {
+    if (m.allDay) return String(m.start).slice(0, 10) <= day && (m.end ? String(m.end).slice(0, 10) > day : String(m.start).slice(0, 10) === day);
+    const s = Date.parse(m.start), e = Date.parse(m.end) || s;
+    return s < to && (e > from || s >= from);
+  }).sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
+const localDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 const spaceArg = (space) => (space ? { space } : {});
 async function spaceNames(conn) {
@@ -296,7 +313,7 @@ export default async function halcyonRoutes(app) {
     const from = list.filter((c) => !req.query.connection || byConn([c], req.query.connection));
     return [...new Set((await Promise.all(from.map(spaceNames))).flat())];
   });
-  app.get('/api/halcyon/events', async (req) => eventsOn(req.user.id, req.query.date, req.query.space));
+  app.get('/api/halcyon/events', async (req) => eventsOn(req.user.id, req.query.date, req.query.space, { from: req.query.from, to: req.query.to }));
   // Today dashboard: open tasks (overdue and due soon first) and e-mails waiting for a reply or an action.
   app.get('/api/halcyon/tasks', async (req) => {
     const scopes = await scopesFor(req.user.id, req.query.space);

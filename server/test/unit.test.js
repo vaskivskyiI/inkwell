@@ -4,7 +4,7 @@ import * as Y from 'yjs';
 import { buildDoc, extract, markdownToBlocks, appendBlocks, strokesHash } from '../src/docmodel.js';
 import { strokesToSvg, strokesToPng } from '../src/ink/render.js';
 import { parseQuery } from '../src/search.js';
-import { parseJson } from '../src/ai/router.js';
+import { parseJson, askJson } from '../src/ai/router.js';
 import { chunk } from '../src/ai/tasks.js';
 import { pageHtml } from '../src/html.js';
 import { encrypt, decrypt, hashPassword, verifyPassword } from '../src/util/crypto.js';
@@ -112,10 +112,28 @@ test('search query operators', () => {
 test('helpers: JSON from models, chunking, secrets, passwords', () => {
   assert.deepEqual(parseJson('```json\n{"a":1}\n```'), { a: 1 });
   assert.deepEqual(parseJson('Sure! {"a":2} hope that helps'), { a: 2 });
+  assert.deepEqual(parseJson('<think>maybe {"x": 1}?</think>\n{"a":3}'), { a: 3 });
+  // LaTeX and raw line breaks inside strings, as handwriting models write them.
+  assert.deepEqual(parseJson('{"text": "$\\alpha + \\sum_i x$\nline two", "n": 1}'), { text: '$\\alpha + \\sum_i x$\nline two', n: 1 });
+  // Cut off at the token limit.
+  assert.deepEqual(parseJson('{"text": "half a sentence", "todos": ["one", "tw'), { text: 'half a sentence', todos: ['one', 'tw'] });
+  assert.deepEqual(parseJson('{"a": 1, "b": {"c": [1, 2,'), { a: 1, b: { c: [1, 2] } });
+  assert.throws(() => parseJson('I cannot read this image.'), /valid JSON/);
   const parts = chunk(`${'a'.repeat(800)}\n\n${'b'.repeat(800)}\n\n${'c'.repeat(100)}`);
   assert.equal(parts.length, 2);
   assert.equal(decrypt(encrypt('s3cret')), 's3cret');
   const h = hashPassword('pw-12345');
   assert.ok(verifyPassword('pw-12345', h));
   assert.ok(!verifyPassword('nope', h));
+});
+
+test('a model that answers in prose is asked again, then its text is used where text helps', async () => {
+  const answers = ['Here is the transcription: hello world', '{"text": "hello world"}'];
+  const sys = [];
+  const r = { model: 'm', provider: { chat: async ({ system }) => { sys.push(system); return { text: answers.shift() }; } } };
+  assert.deepEqual(await askJson(r, { system: 'S', user: 'u' }), { text: 'hello world' });
+  assert.match(sys[1], /one JSON object only/);
+  const prose = { model: 'm', provider: { chat: async () => ({ text: 'A whiteboard with a diagram.' }) } };
+  assert.deepEqual(await askJson(prose, { system: 'S', user: 'u', fallback: (t) => ({ description: t }) }), { description: 'A whiteboard with a diagram.' });
+  await assert.rejects(askJson(prose, { system: 'S', user: 'u' }), /valid JSON/);
 });

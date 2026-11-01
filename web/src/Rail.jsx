@@ -1,11 +1,12 @@
 // The narrow bar on the left, the same as Halcyon's: apps, command palette, space, theme, settings.
-import { NotebookPen, Mail, CalendarDays, CheckSquare, Sparkles, Command, Layers, Settings, Sun, Moon, SunMoon, Plus, Users, Check, Trash2, Bell as Bell2, Home, Columns2, LogOut } from 'lucide-react';
+import { NotebookPen, Mail, CalendarDays, CheckSquare, Sparkles, Command, Layers, Settings, Sun, Moon, SunMoon, Plus, Users, Check, Trash2, Bell as Bell2, Home, Columns2, LogOut, Download } from 'lucide-react';
 import { embedUrl, openBeside } from './SidePane.jsx';
 import { get, post } from './api.js';
 import { store, useStore, navigate, localGet } from './store.js';
 import { switchSpace, loadSpaces, onEvent } from './data.js';
 import { Menu } from './ui/Menu.jsx';
 import { setTheme } from './theme.js';
+import { installApp } from './pwa.js';
 import { useEffect, useState } from 'react';
 
 export const LOGO = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Cpath d='M18 46c8-2 14-10 18-20l6-12 4 2-6 12c-4 10-10 18-20 22z' fill='white'/%3E%3Ccircle cx='18' cy='47' r='3' fill='white'/%3E%3C/svg%3E";
@@ -54,8 +55,10 @@ export async function signOut() {
 
 function Profile() {
   const user = useStore((s) => s.user);
+  const canInstall = useStore((s) => s.canInstall);
   return <Menu className="profile-btn" align="up" label={user?.email || 'Profile'} trigger={<span className="avatar" style={{ background: user?.color }}>{user?.name?.[0]?.toUpperCase()}</span>} items={[
     { label: [user?.name, user?.email].filter(Boolean).join(' · '), onClick: () => navigate('#/settings/profile') },
+    ...(canInstall ? [{ label: 'Install Inkwell app', icon: Download, onClick: () => installApp() }] : []),
     { label: 'Sign out', icon: LogOut, onClick: signOut },
   ]} />;
 }

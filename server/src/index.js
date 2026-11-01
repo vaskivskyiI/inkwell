@@ -91,6 +91,9 @@ export async function buildServer() {
     });
   });
 
+  // A share from another app reaches the server only before the service worker runs: open the app's share page.
+  app.post('/share-target', (req, reply) => reply.redirect('/#/share', 303));
+
   if (fs.existsSync(path.join(config.webDir, 'index.html'))) {
     await app.register(fastifyStatic, { root: config.webDir, wildcard: true, index: false, cacheControl: false, setHeaders: (res, file) => {
       // @fastify/static ≥10 hands over the reply, older versions the raw response.

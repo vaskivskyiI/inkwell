@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { User, Layers, Sparkles, PenLine, Plug, KeyRound, Shield, Trash2, Plus, Check, RefreshCw, Upload, Pencil } from 'lucide-react';
+import { User, Layers, Sparkles, PenLine, Plug, KeyRound, Shield, Trash2, Plus, Check, RefreshCw, Upload, Pencil, Download } from 'lucide-react';
 import { get, post, put, patch, del, sendFile } from './api.js';
+import { installApp, standalone, iosDevice } from './pwa.js';
 import { store, useStore, navigate, openNote, toast, toastError, localGet } from './store.js';
 import { loadSpaces, switchSpace, loadTree } from './data.js';
 import { setTheme } from './theme.js';
@@ -60,12 +61,27 @@ function Profile() {
       {halcyonLogin && <><h3>Halcyon login</h3>
         {user.halcyonLinked ? <p className="muted">Linked. You can sign in with Halcyon, and Halcyon's shared spaces appear here for you.</p>
           : <><p className="muted">Sign in here with your Halcyon login, and get Halcyon's shared spaces as spaces here.</p><a className="button" href="/api/auth/halcyon/start?link=1">Link my Halcyon login</a></>}</>}
+      <InstallApp />
       <h3>Appearance</h3>
       <div className="seg">{['system', 'light', 'dark'].map((t) => <button key={t} className={theme === t ? 'on' : ''} onClick={() => { setThemePref(t); setTheme(t); }}>{t[0].toUpperCase() + t.slice(1)}</button>)}</div>
       <h3>Password</h3>
       <Field label="Current password"><input type="password" autoComplete="current-password" value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} /></Field>
       <Field label="New password" hint="At least 8 characters."><input type="password" autoComplete="new-password" value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} /></Field>
       <button onClick={() => changePw().catch(toastError)} disabled={!pw.password || pw.newPassword.length < 8}>Change password</button>
+    </>
+  );
+}
+
+function InstallApp() {
+  const canInstall = useStore((s) => s.canInstall);
+  if (standalone()) return null;
+  return (
+    <>
+      <h3>App</h3>
+      {canInstall ? <><p className="muted">Install Inkwell as an app: its own window and icon, opens without a connection, and other apps can share photos, files and links to it.</p>
+        <button onClick={() => installApp().catch(toastError)}><Download size={14} /> Install app</button></>
+        : iosDevice() ? <p className="muted">In Safari tap Share, then “Add to Home Screen”: Inkwell gets its own icon and opens full screen.</p>
+          : <p className="muted">Your browser can install Inkwell as an app from its menu (“Install Inkwell” or “Add to Home screen”). Installing needs https.</p>}
     </>
   );
 }

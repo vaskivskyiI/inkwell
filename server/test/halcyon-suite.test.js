@@ -31,6 +31,7 @@ const fake = http.createServer((req, res) => {
     const reply = (result) => send({ jsonrpc: '2.0', id, result: { structuredContent: result, content: [{ text: JSON.stringify(result) }] } });
     if (name === 'list_spaces') return reply({ spaces: [] });
     if (name === 'list_tasks') return reply({ items: box.tasks.filter((t) => !a.ids || a.ids.includes(t.id)) });
+    if (name === 'list_events') return reply({ items: box.events || [] });
     if (name === 'create_task') { const t = { id: 71, title: a.title, done: false }; box.tasks.push(t); return reply(t); }
     if (name === 'complete_task') { box.tasks.find((t) => t.id === a.id).done = a.done; return reply({ ok: true }); }
     return send({ jsonrpc: '2.0', id, result: { isError: true, content: [{ text: 'Unknown tool' }] } });
@@ -89,6 +90,25 @@ test('a mirrored space uses its shared mailbox for every member, and its task li
   assert.equal(r.statusCode, 502);
   assert.match(r.body, /no longer a member/);
   SHARED[7].members.push({ sub: '2', role: 'member' });
+});
+
+test('today lists each meeting and task once: shared rows, all-day dates and the day where the person is', async () => {
+  const day = '2026-03-10', iso = (s) => new Date(s).toISOString();
+  const allDay = (id, d) => ({ id, title: 'Home office', start: `${d}T00:00:00.000Z`, end: `${new Date(Date.parse(`${d}T00:00:00Z`) + 864e5).toISOString().slice(0, 10)}T00:00:00.000Z`, all_day: true });
+  // Halcyon keeps all-day events as UTC dates and also returns what ends exactly where the range starts.
+  BOXES[1].events = [allDay(5, '2026-03-09'), allDay(5, day), allDay(5, '2026-03-11'),
+    { id: 6, title: 'Late call', start: iso('2026-03-09T21:00:00Z'), end: iso('2026-03-09T23:00:00Z'), all_day: false },
+    { id: 8, title: 'Standup', start: iso('2026-03-10T08:00:00Z'), end: iso('2026-03-10T08:15:00Z'), all_day: false }];
+  BOXES[7].events = [BOXES[1].events[4]]; // a shared calendar the own mailbox lists too
+  BOXES[1].tasks.push(BOXES[7].tasks[0]);
+  // Midnight to midnight in UTC+1: 23:00 the day before until 23:00.
+  const ev = await ann.get(`/api/halcyon/events?date=${day}&from=2026-03-09T23:00:00.000Z&to=2026-03-10T23:00:00.000Z`);
+  assert.deepEqual(ev.map((e) => e.title), ['Home office', 'Standup']);
+  assert.equal(ev[0].meta.start.slice(0, 10), day);
+  const tasks = await ann.get('/api/halcyon/tasks');
+  assert.equal(tasks.filter((t) => t.title === 'Lab task').length, 1);
+  assert.equal(new Set(tasks.map((t) => t.ref)).size, tasks.length);
+  BOXES[1].tasks.pop();
 });
 
 test('Halcyon looks up pages with the secret on the two lookup paths only', async () => {

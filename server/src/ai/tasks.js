@@ -84,6 +84,7 @@ registerHandler('ink', async (job) => {
     user: `Page: ${n.title || '(untitled)'}\nstrokes: ${strokes.length}\nNearby typed text (for context only, do not transcribe it):\n${context || '(none)'}`,
     images: [{ mime: 'image/png', data: Buffer.from(png).toString('base64') }],
     maxTokens: 3000,
+    fallback: (text) => ({ text }),
   });
   const text = String(out.text || '').trim().slice(0, 50000);
   const data = {
@@ -114,7 +115,7 @@ registerHandler('image', async (job) => {
   const r = await resolve(job.user_id, 'vision', { spaceId: a.space_id });
   if (!r) return NO_PROVIDER;
   const data = await readAsset(a);
-  const out = await askJson(r, { system: imagePrompt(), user: `File name: ${a.name}`, images: [{ mime: a.mime, data: data.toString('base64') }] });
+  const out = await askJson(r, { system: imagePrompt(), user: `File name: ${a.name}`, images: [{ mime: a.mime, data: data.toString('base64') }], fallback: (t) => ({ description: t.slice(0, 1000) }) });
   const text = [out.description, out.text && `Text: ${out.text}`].filter(Boolean).join(' ').slice(0, 4000);
   await q('UPDATE assets SET ai_text = $2 WHERE id = $1', a.id, text || '-');
   if (a.note_id) {

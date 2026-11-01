@@ -581,3 +581,15 @@ label.check { display: inline-flex; align-items: center; gap: 6px; }
 .danger-zone { margin-top: 28px; padding: 12px 16px 16px; border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border)); border-radius: 10px; }
 .danger-zone h3 { margin-top: 0; color: var(--danger); }
 .danger-zone.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 25%, transparent); }
+
+/* Share to Inkwell (from other apps, or the app's photo shortcut) */
+.share-page .share-items { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 16px; }
+.share-item { display: flex; align-items: center; gap: 12px; padding: 8px; border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.share-item img { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; flex: none; }
+.share-icon { width: 72px; height: 48px; display: grid; place-items: center; color: var(--muted); flex: none; }
+.share-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9em; overflow: auto; }
+.share-targets { display: flex; flex-direction: column; align-items: stretch; gap: 10px; margin-top: 20px; max-width: 460px; }
+.share-targets > button { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 12px 14px; text-align: left; }
+.share-targets .sub { flex-basis: 100%; font-size: 12px; opacity: .8; font-weight: normal; }
+.share-new { display: flex; gap: 8px; align-items: center; }
+.share-new select { flex: 1; min-width: 0; }
