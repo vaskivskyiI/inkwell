@@ -6,7 +6,7 @@
 // there is seen as a moved due date, and a tick here is sent once only (each send would complete one more occurrence).
 import { many, q } from './db/index.js';
 import { registerHandler, enqueue } from './ai/queue.js';
-import { connections, tryEach, call } from './integrations/halcyon.js';
+import { connections, tryEach, call, byConn, suiteEnabled } from './integrations/halcyon.js';
 import { readDoc, withDoc } from './collab.js';
 import { todosOf, setTodoChecked } from './docmodel.js';
 import { logger } from './util/log.js';
@@ -35,7 +35,7 @@ registerHandler('tasksync', async (job) => {
     // Unticking cannot take back a completed occurrence.
     if (l.meta_json?.repeats && !checked) { await setMeta(l, { done: false }); continue; }
     const { conn, out } = await tryEach(conns, l.meta_json?.conn, (c) => call(c, 'complete_task', { id: Number(l.ref), done: checked }));
-    await setMeta(l, { done: checked, conn: l.meta_json?.conn ?? conn.id, ...(out?.completed_id ? { repeats: true, seenDue: out.next_due ?? null } : {}) });
+    await setMeta(l, { done: checked, conn: l.meta_json?.conn ?? conn.key, ...(out?.completed_id ? { repeats: true, seenDue: out.next_due ?? null } : {}) });
   }
 });
 
@@ -46,10 +46,10 @@ export async function pullTasks(user) {
   const links = await many(`SELECT l.id, l.note_id, l.ref, l.title, l.meta_json FROM note_links l JOIN notes n ON n.id = l.note_id
     JOIN space_members m ON m.space_id = n.space_id AND m.user_id = $1 WHERE l.kind = 'task' AND n.deleted_at IS NULL AND l.ref ~ '^[0-9]+$'`, user.id);
   if (!links.length) return { changed: 0 };
-  const known = (l) => conns.some((c) => c.id === l.meta_json?.conn);
+  const known = (l) => byConn(conns, l.meta_json?.conn);
   const found = new Map(); // link → its task, from the link's connection, or the first that has it
   for (const c of conns) {
-    const mine = links.filter((l) => (known(l) ? l.meta_json.conn === c.id : !found.has(l)));
+    const mine = links.filter((l) => (known(l) ? known(l) === c : !found.has(l)));
     if (!mine.length) continue;
     const ids = [...new Set(mine.map((l) => Number(l.ref)))];
     const tasks = new Map(((await call(c, 'list_tasks', { include_done: true, ids }).catch(() => [])) || []).map((t) => [String(t.id), t]));
@@ -75,6 +75,8 @@ export async function pullTasks(user) {
 }
 
 export async function pullAll() {
-  const users = await many("SELECT DISTINCT u.id, u.name FROM users u JOIN integrations i ON i.user_id = u.id AND i.kind = 'halcyon' WHERE NOT u.disabled");
+  // Users signed in with Halcyon have suite connections without any setup of their own.
+  const users = await many(`SELECT u.id, u.name FROM users u WHERE NOT u.disabled AND (($1 AND u.halcyon_sub IS NOT NULL)
+    OR EXISTS (SELECT 1 FROM integrations i WHERE i.user_id = u.id AND i.kind = 'halcyon'))`, suiteEnabled());
   for (const u of users) await pullTasks(u).catch((e) => log.warn(`pull for ${u.id}: ${e.message}`));
 }

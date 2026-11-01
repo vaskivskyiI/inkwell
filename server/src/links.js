@@ -4,7 +4,7 @@ import { one, many, q, now } from './db/index.js';
 import { fail, str, isUuid } from './util/http.js';
 import { needNote, needSpace, userSpaceIds } from './spaces.js';
 import { publish } from './events.js';
-import { connections, scopesFor, spaceForConnection, tryEach, openUrl, eventsOn, call } from './integrations/halcyon.js';
+import { connections, scopesFor, spaceForConnection, tryEach, openUrl, eventsOn, call, byConn } from './integrations/halcyon.js';
 import { createNote, noteOut } from './notes.js';
 import { docFrom, extract, markdownToBlocks } from './docmodel.js';
 import { TEMPLATES } from './templates.js';
@@ -13,7 +13,7 @@ import { config } from './config.js';
 const KINDS = ['note', 'email', 'event', 'task', 'contact', 'url'];
 // "2026-11-03 09:00" in the server's time zone (the pod runs in the host's zone, see deploy/podman-pod.sh).
 const localStamp = (d) => new Date(d).toLocaleString('sv-SE', { hour12: false }).slice(0, 16);
-const connOf = (l, conns) => conns.find((c) => c.id === l.meta_json?.conn) || conns[0];
+const connOf = (l, conns) => byConn(conns, l.meta_json?.conn) || conns[0];
 const linkOut = (l, conns) => ({ id: l.id, kind: l.kind, ref: l.ref, title: l.title, meta: l.meta_json, createdAt: l.created_at, openUrl: l.kind === 'url' ? l.ref : openUrl(connOf(l, conns), l) });
 
 export async function addLink(userId, noteId, { kind, ref, title, meta }) {
@@ -62,7 +62,7 @@ export async function noteFromItem(userId, b) {
   // The item's mailbox and Halcyon space decide first; then earlier notes of this meeting; then the space the user is in;
   // then their first writable one.
   const conns = await connections(userId);
-  const spaceId = (await spaceForConnection(userId, conns.find((c) => c.id === meta.conn))) || (await spaceForLabel(userId, meta.hspace)) || ((await writable(linked[0]?.space_id)) ? linked[0].space_id : null)
+  const spaceId = (await spaceForConnection(userId, byConn(conns, meta.conn))) || (await spaceForLabel(userId, meta.hspace)) || ((await writable(linked[0]?.space_id)) ? linked[0].space_id : null)
     || ((await writable(b.spaceId)) ? b.spaceId : null)
     || (await one("SELECT space_id FROM space_members WHERE user_id = $1 AND role IN ('owner', 'editor') ORDER BY position LIMIT 1", userId))?.space_id
     || fail(403, 'No space you can write in');
@@ -73,7 +73,7 @@ export async function noteFromItem(userId, b) {
     try {
       const { conn, out: m } = await tryEach(conns, meta.conn, (c) => call(c, 'get_message', { id: Number(ref) }));
       title ||= m.subject || '';
-      Object.assign(meta, { conn: conn.id, from: meta.from || m.from, date: meta.date || m.date, summary: meta.summary || m.summary || '' });
+      Object.assign(meta, { conn: conn.key, from: meta.from || m.from, date: meta.date || m.date, summary: meta.summary || m.summary || '' });
     } catch { /* note without details */ }
   }
   const stamp = (d) => (d ? localStamp(d) : localStamp(Date.now()).slice(0, 10));
@@ -242,7 +242,7 @@ export default async function linkRoutes(app) {
       if (!title) continue;
       const t = await call(conn, 'create_task', { title, ...(it.due ? { due: str(it.due, 40) } : {}), notes: `From the Inkwell page "${n.title || 'Untitled'}"` });
       const ref = String(t?.id ?? t?.task?.id ?? title);
-      await addLink(req.user.id, n.id, { kind: 'task', ref, title, meta: { due: it.due || null, conn: conn.id } });
+      await addLink(req.user.id, n.id, { kind: 'task', ref, title, meta: { due: it.due || null, conn: conn.key } });
       out.push({ title, ref });
     }
     publish(n.space_id, 'note:links', { noteId: n.id });

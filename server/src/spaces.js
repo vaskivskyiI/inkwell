@@ -2,6 +2,7 @@
 import { one, many, q, tx, now } from './db/index.js';
 import { fail, str, uuidOr404 } from './util/http.js';
 import { publish, refreshMembership } from './events.js';
+import { availableProviders, spaceProviders } from './ai/router.js';
 
 export const RANK = { viewer: 1, commenter: 2, editor: 3, owner: 4 };
 const ROLES = Object.keys(RANK);
@@ -66,12 +67,24 @@ export default async function spaceRoutes(app) {
   app.patch('/api/spaces/:id', async (req) => {
     await needSpace(req.user.id, req.params.id, 'owner');
     const { name, icon, color, settings } = req.body || {};
+    const picked = settings && typeof settings === 'object' ? pickSpaceSettings(settings) : {};
+    if (settings?.ai && typeof settings.ai === 'object') picked.ai = await spaceAi(req.user.id, req.params.id, settings.ai);
     await q(`UPDATE spaces SET name = coalesce($2, name), icon = coalesce($3, icon), color = coalesce($4, color),
       settings_json = settings_json || $5::jsonb, updated_at = $6 WHERE id = $1`, req.params.id,
     name !== undefined ? str(name, 80) || null : null, icon !== undefined ? str(icon, 8) : null,
-    color && /^#[0-9a-f]{6}$/i.test(color) ? color : null, JSON.stringify(settings && typeof settings === 'object' ? pickSpaceSettings(settings) : {}), now());
+    color && /^#[0-9a-f]{6}$/i.test(color) ? color : null, JSON.stringify(picked), now());
     publish(req.params.id, 'space:changed', { id: req.params.id });
     return { ok: true };
+  });
+
+  // The space's AI models with their providers' names, for members who see them but may not change them.
+  app.get('/api/spaces/:id/ai', async (req) => {
+    await needSpace(req.user.id, req.params.id);
+    const [s, list] = await Promise.all([one('SELECT settings_json FROM spaces WHERE id = $1', req.params.id), spaceProviders(req.params.id)]);
+    return Object.fromEntries(AI_TASKS.map((t) => {
+      const c = s.settings_json?.ai?.[t];
+      return [t, c?.providerId ? { providerId: c.providerId, model: c.model || '', provider: list.find((p) => p.id === c.providerId)?.name || null } : null];
+    }));
   });
 
   // Reorder the sidebar list (per user).
@@ -158,6 +171,21 @@ async function lastOwner(spaceId, userId) {
   const r = await one(`SELECT (SELECT role FROM space_members WHERE space_id = $1 AND user_id = $2) AS role,
     (SELECT count(*)::int FROM space_members WHERE space_id = $1 AND role = 'owner') AS owners`, spaceId, userId);
   return r.role === 'owner' && r.owners <= 1;
+}
+
+// The models a space's pages use, whoever works on them: per task null (each person's own choice) or
+// { providerId, model }. Only server-wide providers and the owner's own, so the choice works for every member.
+const AI_TASKS = ['chat', 'vision', 'embed'];
+async function spaceAi(userId, spaceId, patch) {
+  const out = { ...(await one('SELECT settings_json FROM spaces WHERE id = $1', spaceId))?.settings_json?.ai };
+  const mine = await availableProviders(userId);
+  for (const t of AI_TASKS) {
+    if (patch[t] === undefined) continue;
+    const id = str(patch[t]?.providerId, 40);
+    if (id && !mine.some((p) => p.id === id)) fail(400, 'Choose a server-wide provider or one of your own');
+    out[t] = id ? { providerId: id, model: str(patch[t].model, 200) } : null;
+  }
+  return out;
 }
 
 // Space-level settings: `localAiOnly` keeps the space's content away from cloud AI providers.

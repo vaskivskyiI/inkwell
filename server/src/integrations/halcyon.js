@@ -3,9 +3,16 @@
 // A token reads one mailbox, the person's own or one shared space, so a user holds one connection per mailbox. The
 // first is the main one. Items remember their connection in `meta.conn`; links made before that, or by another member
 // of a space, have none we know and are tried on each connection.
+//
+// When both apps are set up together (INKWELL_HALCYON_URL + INKWELL_HALCYON_SECRET), a user signed in with Halcyon
+// needs no token: "suite" connections reach their own mailbox and each mirrored shared space with the sign-on secret,
+// and Halcyon checks per call that the person may read that mailbox. Their ids are the same for every member
+// ('suite:<Halcyon shared id>'), so a link or a space's choice made by one member works for all.
+import fs from 'node:fs';
 import https from 'node:https';
 import tls from 'node:tls';
 import { one, many, q, now } from '../db/index.js';
+import { config } from '../config.js';
 import { encrypt, decrypt } from '../util/crypto.js';
 import { fail, str, isUuid } from '../util/http.js';
 import { logger } from '../util/log.js';
@@ -13,20 +20,45 @@ import { logger } from '../util/log.js';
 const log = logger('halcyon');
 let rpcId = 1;
 
-export async function connections(userId) {
-  const rows = await many("SELECT id, name, base_url, token_enc, settings_json FROM integrations WHERE user_id = $1 AND kind = 'halcyon' ORDER BY created_at, id", userId);
-  return rows.map((r) => ({ id: r.id, name: r.name, baseUrl: r.base_url, token: decrypt(r.token_enc), settings: r.settings_json, tls: r.settings_json?.tls }));
+let ca;
+/** TLS for calls to the Halcyon this server is set up with: its CA file, when it has a private one. */
+export const suiteTls = () => (config.halcyonCa ? { ca: (ca ??= fs.readFileSync(config.halcyonCa, 'utf8')) } : null);
+export const suiteEnabled = () => !!(config.halcyonUrl && config.halcyonSecret);
+
+async function suiteConnections(userId) {
+  if (!suiteEnabled()) return [];
+  const u = await one('SELECT name, halcyon_sub FROM users WHERE id = $1', userId);
+  if (!u?.halcyon_sub) return [];
+  const sub = u.halcyon_sub, base = { baseUrl: config.halcyonUrl, tls: suiteTls(), settings: {} };
+  const shared = await many(`SELECT s.name, s.settings_json->>'halcyonShared' AS hid FROM spaces s JOIN space_members m ON m.space_id = s.id AND m.user_id = $1
+    WHERE s.settings_json->>'halcyonShared' IS NOT NULL ORDER BY m.position`, userId);
+  // The own mailbox is 'suite' for everyone, so links remember whose it was: another member's 'suite' is not theirs.
+  return [{ ...base, id: 'suite', key: `suite@${sub}`, name: u.name || 'Halcyon', suite: { sub, target: sub } },
+    ...shared.map((s) => ({ ...base, id: `suite:${s.hid}`, key: `suite:${s.hid}`, name: s.name, suite: { sub, target: s.hid } }))];
 }
+
+/** Pasted connections (own token, maybe another Halcyon server). */
+async function manualConnections(userId) {
+  const rows = await many("SELECT id, name, base_url, token_enc, settings_json FROM integrations WHERE user_id = $1 AND kind = 'halcyon' ORDER BY created_at, id", userId);
+  return rows.map((r) => ({ id: r.id, key: r.id, name: r.name, baseUrl: r.base_url, token: decrypt(r.token_enc), settings: r.settings_json, tls: r.settings_json?.tls }));
+}
+
+export async function connections(userId) {
+  return [...(await suiteConnections(userId)), ...(await manualConnections(userId))];
+}
+
+/** The connection an item or a setting names: by id, or by the key links store. */
+export const byConn = (list, id) => (id ? list.find((c) => c.id === id || c.key === id) : undefined);
 
 /** The connection with this id, else the main one, else null. */
 export async function connection(userId, id) {
   const list = await connections(userId);
-  return list.find((c) => c.id === id) || list[0] || null;
+  return byConn(list, id) || list[0] || null;
 }
 
 /** First answer from the item's connection, or from each in turn when its connection is not known here. */
 export async function tryEach(list, id, fn) {
-  const known = list.find((c) => c.id === id);
+  const known = byConn(list, id);
   let failure;
   for (const c of known ? [known] : list) {
     try { return { conn: c, out: await fn(c) }; } catch (e) { failure = e; }
@@ -71,11 +103,15 @@ export async function call(conn, tool, args = {}, { timeoutMs = 20000 } = {}) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
+    const auth = conn.suite
+      ? { authorization: `Bearer ${config.halcyonSecret}`, 'x-halcyon-sub': conn.suite.sub, 'x-halcyon-target': conn.suite.target }
+      : { authorization: `Bearer ${conn.token}` };
     const r = await postJson(`${conn.baseUrl}/api/mcp`, {
       signal: ctl.signal, tls: conn.tls,
-      headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${conn.token}` },
+      headers: { 'content-type': 'application/json', accept: 'application/json', ...auth },
       body: JSON.stringify({ jsonrpc: '2.0', id: rpcId++, method: 'tools/call', params: { name: tool, arguments: args } }),
     });
+    if (r.status === 401 && conn.suite) fail(502, `Halcyon refused access to ${conn.name} — you are no longer a member there, or Inkwell's access was revoked in Halcyon`);
     if (r.status === 401) fail(502, 'Halcyon refused the token — create a new one in Halcyon → Settings → Assistants');
     if (!r.ok) fail(502, `Halcyon answered ${r.status}`);
     const d = await r.json();
@@ -105,7 +141,7 @@ const contactOut = (c) => ({ kind: 'contact', ref: String(c.id ?? c.email ?? c.n
 // Marks where an item came from; the mailbox's name is shown only when there is more than one to tell apart.
 const fromConn = (conn, several, it) => ({
   ...it, openUrl: openUrl(conn, it), subtitle: [several && conn.name, it.subtitle].filter(Boolean).join(' · '),
-  meta: { ...it.meta, conn: conn.id, ...(several ? { source: conn.name } : {}) },
+  meta: { ...it.meta, conn: conn.key, ...(several ? { source: conn.name } : {}) },
 });
 
 async function searchOne(conn, kind, qs) {
@@ -148,8 +184,9 @@ async function spaceNames(conn) {
 
 /**
  * Which mailboxes an Inkwell space shows, and under which Halcyon space label: { conn, label }[].
- * The connection chosen in its settings, else connections with the space's name, else all of them. Among several,
- * those that have the Halcyon space win: "Work" should not list everything of a shared mailbox without a "Work".
+ * The connection chosen in its settings, else the shared mailbox a mirrored space stands for, else connections with
+ * the space's name, else all of them. Among several, those that have the Halcyon space win: "Work" should not list
+ * everything of a shared mailbox without a "Work".
  */
 export async function scopesFor(userId, spaceId) {
   const list = await needAll(userId);
@@ -157,7 +194,8 @@ export async function scopesFor(userId, spaceId) {
   if (!s) return list.map((conn) => ({ conn, label: '' }));
   const explicit = s.settings_json?.halcyonSpace;
   const wanted = String(explicit ?? s.name).toLowerCase();
-  const chosen = list.find((c) => c.id === s.settings_json?.halcyonConnection);
+  const shared = s.settings_json?.halcyonShared;
+  const chosen = byConn(list, s.settings_json?.halcyonConnection) || (shared != null ? byConn(list, `suite:${shared}`) : undefined);
   const named = list.filter((c) => c.name.toLowerCase() === s.name.toLowerCase());
   const pick = chosen ? [chosen] : named.length ? named : list;
   const scopes = await Promise.all(pick.map(async (conn) => {
@@ -173,7 +211,9 @@ export async function spaceForConnection(userId, conn) {
   if (!conn) return null;
   const rows = await many(`SELECT s.id, s.name, s.settings_json FROM spaces s JOIN space_members m ON m.space_id = s.id AND m.user_id = $1
     WHERE m.role IN ('owner', 'editor') ORDER BY m.position`, userId);
-  return (rows.find((s) => s.settings_json?.halcyonConnection === conn.id) || rows.find((s) => s.name.toLowerCase() === conn.name.toLowerCase()))?.id || null;
+  const hid = conn.suite && conn.id !== 'suite' ? conn.suite.target : null;
+  return (rows.find((s) => hid != null && s.settings_json?.halcyonShared === hid)
+    || rows.find((s) => s.settings_json?.halcyonConnection === conn.id) || rows.find((s) => s.name.toLowerCase() === conn.name.toLowerCase()))?.id || null;
 }
 
 export const openUrl = (conn, link) => {
@@ -189,7 +229,9 @@ export default async function halcyonRoutes(app) {
   const state = async (userId) => {
     const list = await connections(userId);
     if (!list.length) return { connected: false, connections: [] };
-    return { connected: true, baseUrl: list[0].baseUrl, settings: list[0].settings, connections: list.map(({ id, name, baseUrl, settings }) => ({ id, name, baseUrl, settings })) };
+    // Suite connections are set up by the administrator: shown, but neither edited nor removed here.
+    return { connected: true, baseUrl: list[0].baseUrl, settings: list[0].settings, suite: list.some((c) => c.suite),
+      connections: list.map(({ id, name, baseUrl, settings, suite }) => ({ id, name, baseUrl, settings, ...(suite ? { suite: true, shared: suite.target !== suite.sub } : {}) })) };
   };
 
   // Checked before saving, so a typo shows up now rather than in the link picker.
@@ -213,14 +255,14 @@ export default async function halcyonRoutes(app) {
 
   // The main connection, as one call.
   app.put('/api/integrations/halcyon', async (req) => {
-    const main = (await connections(req.user.id))[0];
+    const main = (await manualConnections(req.user.id))[0];
     const c = await checked(req.body || {});
     if (main) await update(main.id, main.name, c); else await insert(req.user.id, 'My mail', c);
     return state(req.user.id);
   });
 
   app.post('/api/integrations/halcyon/connections', async (req) => {
-    const list = await connections(req.user.id);
+    const list = await manualConnections(req.user.id);
     const name = str(req.body?.name, 60) || (list.length ? `Shared ${list.length}` : 'My mail');
     if (list.some((c) => c.name.toLowerCase() === name.toLowerCase())) fail(409, 'You already have a connection with this name');
     await insert(req.user.id, name, await checked(req.body || {}));
@@ -228,7 +270,7 @@ export default async function halcyonRoutes(app) {
   });
 
   app.patch('/api/integrations/halcyon/connections/:id', async (req) => {
-    const list = await connections(req.user.id);
+    const list = await manualConnections(req.user.id);
     const conn = list.find((c) => c.id === req.params.id) || fail(404, 'Connection not found');
     const b = req.body || {};
     const name = str(b.name, 60) || conn.name;
@@ -251,7 +293,7 @@ export default async function halcyonRoutes(app) {
   // Halcyon's space names, of one connection or all; older Halcyon versions do not offer the tool.
   app.get('/api/halcyon/spaces', async (req) => {
     const list = await connections(req.user.id);
-    const from = list.filter((c) => !req.query.connection || c.id === req.query.connection);
+    const from = list.filter((c) => !req.query.connection || byConn([c], req.query.connection));
     return [...new Set((await Promise.all(from.map(spaceNames))).flat())];
   });
   app.get('/api/halcyon/events', async (req) => eventsOn(req.user.id, req.query.date, req.query.space));

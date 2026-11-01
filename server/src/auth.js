@@ -1,4 +1,5 @@
 // Accounts, sessions (httpOnly cookie for browsers) and API tokens (Bearer, for native apps and integrations).
+import crypto from 'node:crypto';
 import { one, many, q, tx, now } from './db/index.js';
 import { config } from './config.js';
 import { hashPassword, verifyPassword, randomToken, sha256 } from './util/crypto.js';
@@ -37,6 +38,18 @@ export async function userForToken(token) {
 
 export const authenticate = (req) => userForToken(tokenOf(req));
 
+// Halcyon, set up together with this server, asks on behalf of one of its users with the shared sign-on secret
+// (no per-user token). Only these reads: what pages are linked to an item, and the recent pages.
+const SUITE_PATHS = new Set(['/api/links/lookup', '/api/recent']);
+const sameSecret = (a, b) => crypto.timingSafeEqual(crypto.createHash('sha256').update(a).digest(), crypto.createHash('sha256').update(b).digest());
+async function suiteUser(req) {
+  if (req.method !== 'GET' || !SUITE_PATHS.has(req.url.split('?')[0]) || !req.headers['x-halcyon-sub']) return undefined;
+  const h = req.headers.authorization || '';
+  if (!config.halcyonUrl || !config.halcyonSecret || !h.startsWith('Bearer ') || !sameSecret(h.slice(7).trim(), config.halcyonSecret)) return undefined;
+  const u = await one('SELECT * FROM users WHERE halcyon_sub = $1 AND NOT disabled', String(req.headers['x-halcyon-sub']));
+  return u || fail(401, 'No Inkwell user for this Halcyon login');
+}
+
 const attempts = new Map();
 function throttle(key) {
   const t = now();
@@ -68,7 +81,7 @@ export async function createUser({ email, name, password }) {
 /** Root-level preHandler: every /api route except the public ones needs a user. */
 export async function requireUser(req) {
   if (!req.url.startsWith('/api/') || PUBLIC.test(req.url) || req.url.startsWith('/api/collab') || req.url.startsWith('/api/ws')) return;
-  const u = await authenticate(req);
+  const u = (await suiteUser(req)) || await authenticate(req);
   if (!u) fail(401, 'Sign in required');
   req.user = u;
 }

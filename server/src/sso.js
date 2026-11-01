@@ -2,14 +2,13 @@
 // INKWELL_HALCYON_SECRET here, HALCYON_SSO_SECRET and this callback in HALCYON_SSO_REDIRECTS there). Halcyon answers with a
 // one-time code; the login itself is fetched server to server. Passwords keep working, so Inkwell also stands alone.
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import { one, q } from './db/index.js';
 import { config } from './config.js';
 import { fail } from './util/http.js';
 import { logger } from './util/log.js';
 import { COOKIE, authenticate, createSession, createUser, setCookie } from './auth.js';
 import { sha256 } from './util/crypto.js';
-import { postJson } from './integrations/halcyon.js';
+import { postJson, suiteTls } from './integrations/halcyon.js';
 import { mirrorSpaces } from './mirror.js';
 
 const log = logger('sso');
@@ -19,7 +18,7 @@ const callback = (req) => `${config.publicUrl || `${req.protocol}://${req.header
 
 /** A request from this server to Halcyon, with the shared secret. */
 export async function askHalcyon(path, body = {}) {
-  const r = await postJson(`${config.halcyonUrl}${path}`, { body: JSON.stringify(body), signal: AbortSignal.timeout(15000), tls: config.halcyonCa ? { ca: fs.readFileSync(config.halcyonCa, 'utf8') } : null,
+  const r = await postJson(`${config.halcyonUrl}${path}`, { body: JSON.stringify(body), signal: AbortSignal.timeout(15000), tls: suiteTls(),
     headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${config.halcyonSecret}` } });
   const data = await r.json().catch(() => null);
   if (!r.ok) fail(502, data?.error || `Halcyon answered ${r.status}`);

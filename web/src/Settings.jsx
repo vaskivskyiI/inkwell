@@ -110,6 +110,7 @@ function Spaces() {
           <label className="check"><input type="checkbox" checked={space.settings?.aiEnabled !== false} onChange={(e) => patch(`/api/spaces/${space.id}`, { settings: { aiEnabled: e.target.checked } }).then(loadSpaces).catch(toastError)} /> AI features in this space</label>
         </>
       )}
+      {space.settings?.aiEnabled !== false && <SpaceAi key={space.id} space={space} owner={owner} />}
       {owner && halcyon?.connections?.length > 1 && (
         <Field label="Halcyon mailbox" hint="Whose mail, calendar and tasks this space shows. Automatic: the connection with the same name as this space, otherwise all of them.">
           <select value={halcyon.connections.some((c) => c.id === hconn) ? hconn : ''} onChange={(e) => patch(`/api/spaces/${space.id}`, { settings: { halcyonConnection: e.target.value || null } }).then(loadSpaces).catch(toastError)}>
@@ -369,12 +370,54 @@ function PenSettings() {
   );
 }
 
+// The models a space's pages use for everyone in it, whoever starts the work: chosen once by its owner, shown to the
+// other members. Automatic leaves it to each person's own choice.
+function SpaceAi({ space, owner }) {
+  const [info, setInfo] = useState(null);
+  const [providers, setProviders] = useState([]);
+  const [models, setModels] = useState({});
+  const load = () => get(`/api/spaces/${space.id}/ai`).then(setInfo).catch(toastError);
+  useEffect(() => { load(); if (owner) get('/api/ai/providers').then(setProviders).catch(() => {}); }, [owner]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ids = info ? TASKS.slice(0, 3).map(([t]) => info[t]?.providerId).filter(Boolean).join() : '';
+  useEffect(() => {
+    if (owner) for (const id of new Set(ids.split(',').filter(Boolean))) if (!models[id]) post('/api/ai/models', { id }).then((m) => m, (e) => ({ error: e.message })).then((m) => setModels((x) => ({ ...x, [id]: m })));
+  }, [ids, owner]); // eslint-disable-line react-hooks/exhaustive-deps
+  const set = (task, providerId, model) => patch(`/api/spaces/${space.id}`, { settings: { ai: { [task]: providerId ? { providerId, model } : null } } }).then(load).catch(toastError);
+  if (!info) return null;
+  return (
+    <>
+      <h3>AI models for this space</h3>
+      <p className="hint">{owner ? 'Work on this space’s pages uses these for everyone in it. Automatic: each person’s own choice under Settings → AI. You can pick server-wide providers and your own.'
+        : 'Set by the space’s owner. Automatic: your own choice under Settings → AI.'}</p>
+      {TASKS.slice(0, 3).map(([task, label]) => {
+        const c = info[task];
+        return (
+          <div key={task} className="route-row">
+            <span className="label">{label}</span>
+            {owner ? <>
+              <select value={c?.providerId || ''} onChange={(e) => set(task, e.target.value, '')}>
+                <option value="">Automatic (each person’s own)</option>
+                {c?.providerId && !providers.some((p) => p.id === c.providerId) && <option value={c.providerId}>{c.provider || 'Unavailable provider'}</option>}
+                {providers.map((p) => <option key={p.id} value={p.id}>{p.name}{p.shared ? ' (server-wide)' : ''}</option>)}
+              </select>
+              {c?.providerId && <ModelPicker task={task} value={c.model} list={models[c.providerId]} onPick={(m) => set(task, c.providerId, m)} />}
+            </> : <span>{c ? `${c.provider || 'Unavailable provider'}${c.model ? ` · ${c.model}` : ''}` : 'Automatic (your own choice)'} <span className="hint">— set by the space’s owner</span></span>}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 function Integrations() {
   const halcyon = useStore((s) => s.halcyon);
-  const list = halcyon?.connections || [];
+  const all = halcyon?.connections || [];
+  // Suite connections come with the Halcyon sign-in; pasted ones are for another Halcyon server.
+  const suite = all.filter((c) => c.suite);
+  const list = all.filter((c) => !c.suite);
   const blank = { name: '', baseUrl: list[0]?.baseUrl || '', token: '', tls: { mode: 'check', ca: '' } };
   const [form, setForm] = useState(null);
-  const shown = form || (list.length ? null : blank);
+  const shown = form || (all.length ? null : blank);
   const [busy, setBusy] = useState(false);
   const set = (patchObj) => setForm({ ...shown, ...patchObj });
   const tlsBody = (t) => (t.mode === 'keep' ? undefined : t.mode === 'skip' ? { insecure: true } : t.mode === 'ca' ? { ca: t.ca } : {});
@@ -392,6 +435,19 @@ function Integrations() {
       <h2>Integrations</h2>
       <h3>Halcyon — mail, calendar & tasks</h3>
       <p>Link pages with e-mails, meetings and tasks, start meeting notes from your calendar and send action items to your task list.</p>
+      {suite.map((c) => (
+        <div key={c.id} className="provider">
+          <Check size={16} /> <b>{c.name}</b>
+          <span className="muted small">{c.shared ? 'shared space' : 'your mail'} · through Halcyon sign-in — set up by the administrator</span>
+        </div>
+      ))}
+      {suite.length > 0 && <p className="hint">Nothing to set up: your own mail and the shared spaces you are in come with your Halcyon login.</p>}
+      {suite.length > 0 ? <details className="advice" open={list.length > 0 || !!form}><summary>Other Halcyon server</summary>{manual()}</details> : manual()}
+    </>
+  );
+
+  function manual() {
+    return <>
       {list.map((c, i) => (
         <div key={c.id} className="provider">
           <Check size={16} /> <b>{c.name}</b>
@@ -417,12 +473,12 @@ function Integrations() {
           {/^https:/i.test(shown.baseUrl.trim()) && <CertField value={shown.tls} onChange={(tls) => set({ tls })} />}
           <div className="row">
             <button className="primary" disabled={busy || !shown.baseUrl || (!shown.id && !shown.token)} onClick={save}>{busy ? 'Checking…' : shown.id ? 'Save' : 'Connect'}</button>
-            {form && list.length > 0 && <button onClick={() => setForm(null)}>Cancel</button>}
+            {form && all.length > 0 && <button onClick={() => setForm(null)}>Cancel</button>}
           </div>
         </div>
       )}
-    </>
-  );
+    </>;
+  }
 }
 
 /**
@@ -517,7 +573,7 @@ function Tokens() {
   return (
     <>
       <h2>Apps & tokens</h2>
-      <p>Native apps sign in and get their own token. Create one here for scripts or for Halcyon to look up notes linked to its e-mails and events (<code>GET /api/links/lookup?kind=event&ref=…</code>).</p>
+      <p>Native apps sign in and get their own token. Create one here for scripts, or for a Halcyon on another server to look up notes linked to its e-mails and events (<code>GET /api/links/lookup?kind=event&ref=…</code>) — the Halcyon set up with this server needs none.</p>
       {fresh && <div className="banner">Copy it now — it is shown only once: <code className="select">{fresh}</code></div>}
       <button onClick={async () => { const name = window.prompt('Name for the token', 'Halcyon'); if (name) { setFresh((await post('/api/tokens', { name })).token); load(); } }}><Plus size={14} /> New token</button>
       <table className="members"><tbody>
