@@ -12,10 +12,15 @@ after(() => app.close());
 
 const space = (c, name) => c.spaces.find((s) => s.name === name);
 
-test('sign-up: first user is admin, gets Private + Work and a welcome page', async () => {
+test('sign-up: first user is admin, gets one space "My space" and a welcome page', async () => {
   assert.equal(ann.user.isAdmin, true);
   assert.equal(bob.user.isAdmin, false);
-  assert.deepEqual(ann.spaces.map((s) => s.name), ['Private', 'Work']);
+  const fresh = client(app);
+  await fresh.post('/api/auth/signup', { email: 'new@test.local', name: 'New', password: 'secret123' });
+  const own = await fresh.get('/api/spaces');
+  assert.deepEqual(own.map((s) => s.name), ['My space']);
+  assert.equal((await fresh.get(`/api/spaces/${own[0].id}/tree`)).notes[0].title, 'Welcome to Inkwell');
+  assert.equal(await fresh.status('DELETE', `/api/spaces/${own[0].id}`), 400, 'the last own space stays');
   const tree = await ann.get(`/api/spaces/${space(ann, 'Private').id}/tree`);
   assert.equal(tree.notes[0].title, 'Welcome to Inkwell');
   const anon = client(app);
@@ -193,7 +198,7 @@ test('links: URLs and pages, reverse lookup by kind/ref', async () => {
 
 test('admin: list users, disable a user, sign-up switch', async () => {
   const users = await ann.get('/api/admin/users');
-  assert.equal(users.length, 2);
+  assert.equal(users.length, 3); // ann, bob and the fresh account of the first test
   assert.equal(await bob.status('GET', '/api/admin/users'), 403);
   await ann.put('/api/admin/settings', { allowSignup: false });
   assert.equal(await client(app).status('POST', '/api/auth/signup', { email: 'eve@test.local', password: 'secret123' }), 403);
@@ -207,7 +212,7 @@ test('admin: add and edit users', async () => {
   assert.equal(await bob.status('POST', '/api/admin/users', { email: 'x@test.local', password: 'secret123' }), 403);
   const { id } = await ann.post('/api/admin/users', { email: 'Zoe@test.local', name: 'Zoe', password: 'secret123', isAdmin: true });
   let u = (await ann.get('/api/admin/users')).find((x) => x.id === id);
-  assert.deepEqual([u.email, u.name, u.isAdmin, u.spaces], ['zoe@test.local', 'Zoe', true, 2]);
+  assert.deepEqual([u.email, u.name, u.isAdmin, u.spaces], ['zoe@test.local', 'Zoe', true, 1]);
   assert.equal(await ann.status('POST', '/api/admin/users', { email: 'zoe@test.local', password: 'secret123' }), 409);
 
   const zoe = client(app);
@@ -223,6 +228,37 @@ test('admin: add and edit users', async () => {
   assert.equal(await ann.status('PATCH', '/api/admin/users/nope', { name: 'x' }), 404);
   await ann.patch(`/api/admin/users/${ann.user.id}`, { password: 'secret123' });
   await ann.get('/api/me'); // the admin's own session survives their own reset
+});
+
+test('deleting a space: its pages, sub-pages, files and trash move to another space, or go with it', async () => {
+  const keep = space(ann, 'Private').id;
+  const gone = await ann.post('/api/spaces', { name: 'Old project' });
+  const top = await ann.post('/api/notes', { spaceId: gone.id, title: 'Plan' });
+  const sub = await ann.post('/api/notes', { spaceId: gone.id, title: 'Detail', parentId: top.id });
+  const trashed = await ann.post('/api/notes', { spaceId: gone.id, title: 'Draft' });
+  await ann.del(`/api/notes/${trashed.id}`);
+  const day = await ann.post('/api/journal', { spaceId: gone.id, date: '2026-05-05' });
+  await ann.post('/api/journal', { spaceId: keep, date: '2026-05-05' });
+  const b = 'x-b';
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201e2216bc50000000049454e44ae426082', 'hex');
+  const body = Buffer.concat([Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="noteId"\r\n\r\n${top.id}\r\n--${b}\r\nContent-Disposition: form-data; name="file"; filename="d.png"\r\nContent-Type: image/png\r\n\r\n`), png, Buffer.from(`\r\n--${b}--\r\n`)]);
+  const up = JSON.parse((await app.inject({ method: 'POST', url: '/api/assets', payload: body, headers: { cookie: ann.cookie, 'content-type': `multipart/form-data; boundary=${b}` } })).body);
+
+  assert.equal(await bob.status('DELETE', `/api/spaces/${gone.id}?moveTo=${space(bob, 'Work').id}`), 404);
+  assert.equal(await ann.status('DELETE', `/api/spaces/${gone.id}?moveTo=${space(bob, 'Work').id}`), 404);
+  const r = await ann.del(`/api/spaces/${gone.id}?moveTo=${keep}`);
+  assert.equal(r.moved, 5); // with the "Journal" page that holds the day's journal
+  assert.ok(!(await ann.get('/api/spaces')).some((s) => s.id === gone.id));
+  const { notes } = await ann.get(`/api/spaces/${keep}/tree`);
+  assert.equal(notes.find((n) => n.id === sub.id).parentId, top.id);
+  assert.ok(notes.some((n) => n.id === day.id));
+  assert.ok((await ann.get('/api/trash')).some((n) => n.id === trashed.id));
+  assert.equal((await app.inject({ method: 'GET', url: up.url, headers: { cookie: ann.cookie } })).statusCode, 200);
+
+  const temp = await ann.post('/api/spaces', { name: 'Scratch' });
+  const lost = await ann.post('/api/notes', { spaceId: temp.id, title: 'Lost' });
+  await ann.del(`/api/spaces/${temp.id}`);
+  assert.equal(await ann.status('GET', `/api/notes/${lost.id}`), 404);
 });
 
 test('a page moves to a shared space with its sub-pages, files and into a chosen parent', async () => {

@@ -577,3 +577,7 @@ label.check { display: inline-flex; align-items: center; gap: 6px; }
 .capture-title { font-size: 17px; }
 .capture-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .capture-buttons .big { flex: 1 1 100%; min-height: 52px; font-size: 17px; justify-content: center; }
+
+.danger-zone { margin-top: 28px; padding: 12px 16px 16px; border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border)); border-radius: 10px; }
+.danger-zone h3 { margin-top: 0; color: var(--danger); }
+.danger-zone.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 25%, transparent); }

@@ -39,6 +39,10 @@ export async function signup(app, email, name = email.split('@')[0]) {
   const c = client(app);
   const r = await c.post('/api/auth/signup', { email, name, password: 'secret123' });
   c.user = r.user;
+  // A new account has one space; the tests work with the two most people make: Private (the first) and Work.
+  const [mine] = await c.get('/api/spaces');
+  await c.patch(`/api/spaces/${mine.id}`, { name: 'Private' });
+  await c.post('/api/spaces', { name: 'Work', icon: '💼' });
   c.spaces = await c.get('/api/spaces');
   return c;
 }

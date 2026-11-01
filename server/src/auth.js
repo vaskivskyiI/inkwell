@@ -58,9 +58,9 @@ export async function createUser({ email, name, password }) {
     const color = COLORS[Math.floor(Math.random() * COLORS.length)];
     const u = await one('INSERT INTO users (email, name, password_hash, color, is_admin, created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
       email, name, hashPassword(password), color, first, now());
-    const priv = await createSpace(u.id, { name: 'Private', icon: '🏠', color: '#6366f1' });
-    await createSpace(u.id, { name: 'Work', icon: '💼', color: '#0ea5e9' });
-    await createWelcome(u.id, priv.id);
+    // One space to start with; more (work, a team…) only when the person makes them.
+    const mine = await createSpace(u.id, { name: 'My space', icon: '🏠', color: '#6366f1' });
+    await createWelcome(u.id, mine.id);
     return u;
   });
 }

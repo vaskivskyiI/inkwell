@@ -32,7 +32,7 @@ export const WELCOME_MD = `Inkwell keeps typed and handwritten notes together, s
 - **Ask Inkwell** (right panel) answers questions from your notes.
 
 ## Spaces
-You start with *Private* and *Work*. Create more and share them from the space menu — co-editors see each other's cursors.
+You start with *My space*. Make more (work, a team, a project) and share them from the space menu — co-editors see each other's cursors.
 
 ## Halcyon
 Connect Halcyon in **Settings → Integrations** to link pages with e-mails, calendar events and tasks, and to start meeting notes from your calendar.

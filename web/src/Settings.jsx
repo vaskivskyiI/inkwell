@@ -76,6 +76,7 @@ function Spaces() {
   const [hspaces, setHspaces] = useState([]);
   const route = useStore((s) => s.route);
   const [sel, setSel] = useState(route.query.space || spaces[0]?.id);
+  useEffect(() => { if (route.query.space) setSel(route.query.space); }, [route.query.space]);
   const space = spaces.find((s) => s.id === sel) || spaces[0];
   const [members, setMembers] = useState([]);
   const [invite, setInvite] = useState({ email: '', role: 'editor' });
@@ -149,8 +150,58 @@ function Spaces() {
         </div>
       )}
       <p className="hint">Editors write and organise pages; commenters and viewers read (commenting comes later). Everyone sees co-editors' cursors live.</p>
-      {owner && <><h3>Danger zone</h3><button className="danger" onClick={() => { if (window.confirm(`Delete the space “${space.name}” with all its pages for everyone?`)) del(`/api/spaces/${space.id}`).then(loadSpaces).then(() => switchSpace(store.get().spaces[0]?.id)).catch(toastError); }}><Trash2 size={14} /> Delete space</button></>}
+      {owner && <DeleteSpace space={space} spaces={spaces} open={route.query.delete === '1'} onDone={(next) => setSel(next)} />}
     </>
+  );
+}
+
+// Deleting a space: its pages go to another space first, unless the person chooses to delete them too.
+function DeleteSpace({ space, spaces, open, onDone }) {
+  const targets = spaces.filter((s) => s.id !== space.id && ['owner', 'editor'].includes(s.role));
+  const [to, setTo] = useState(targets[0]?.id || '');
+  const [count, setCount] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const ownCount = spaces.filter((s) => s.role === 'owner').length;
+  useEffect(() => {
+    setTo(targets[0]?.id || '');
+    get(`/api/spaces/${space.id}/tree`).then((r) => setCount(r.notes.length)).catch(() => setCount(null));
+    if (open) setTimeout(() => document.getElementById('delete-space')?.scrollIntoView({ block: 'center' }), 50);
+  }, [space.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const run = async () => {
+    const target = targets.find((s) => s.id === to);
+    const what = count ? `${count} page${count === 1 ? '' : 's'}` : 'its pages';
+    const others = space.members > 1 ? ` ${space.members - 1} other ${space.members === 2 ? 'person' : 'people'} lose${space.members === 2 ? 's' : ''} access to it.` : '';
+    const msg = target ? `Delete the space “${space.name}”? Its ${what} ${count === 1 ? 'moves' : 'move'} to “${target.name}”.${others}`
+      : `Delete the space “${space.name}” and its ${what} for everyone? This cannot be undone.${others}`;
+    if (!window.confirm(msg)) return;
+    setBusy(true);
+    try {
+      const r = await del(`/api/spaces/${space.id}${target ? `?moveTo=${target.id}` : ''}`);
+      await loadSpaces();
+      const next = target?.id || store.get().spaces[0]?.id;
+      if (target) await loadTree(target.id);
+      if (store.get().spaceId === space.id || !store.get().spaces.some((s) => s.id === store.get().spaceId)) switchSpace(next);
+      toast(target ? `Space deleted — ${r.moved} page${r.moved === 1 ? '' : 's'} moved to ${target.name}` : 'Space deleted');
+      onDone(next);
+      navigate(`#/settings/spaces?space=${next}`);
+    } catch (e) { toastError(e); }
+    setBusy(false);
+  };
+  return (
+    <div id="delete-space" className={`danger-zone${open ? ' flash' : ''}`}>
+      <h3>Delete this space</h3>
+      {ownCount <= 1 ? <p className="hint">This is your only space of your own, so it cannot be deleted. Make another one first.</p> : (
+        <>
+          <Field label={`Its pages${count != null ? ` (${count})` : ''}`} hint="Moved pages keep their sub-pages, files, history and the trash.">
+            <select value={to} onChange={(e) => setTo(e.target.value)}>
+              {targets.map((s) => <option key={s.id} value={s.id}>Move to {s.icon} {s.name}</option>)}
+              <option value="">Delete them with the space</option>
+            </select>
+          </Field>
+          <button className="danger" disabled={busy} onClick={run}>{busy ? <span className="spinner" /> : <Trash2 size={14} />} Delete space</button>
+        </>
+      )}
+    </div>
   );
 }
 

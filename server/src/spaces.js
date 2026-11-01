@@ -81,13 +81,35 @@ export default async function spaceRoutes(app) {
     return { ok: true };
   });
 
+  // `moveTo`: its pages (with their sub-pages, files and trash) go to that space first; without it they are deleted.
   app.delete('/api/spaces/:id', async (req) => {
-    await needSpace(req.user.id, req.params.id, 'owner');
+    const id = req.params.id;
+    await needSpace(req.user.id, id, 'owner');
     if ((await one("SELECT count(*)::int AS n FROM space_members WHERE user_id = $1 AND role = 'owner'", req.user.id)).n <= 1) fail(400, 'You need to keep at least one space of your own');
-    const members = await many('SELECT user_id FROM space_members WHERE space_id = $1', req.params.id);
-    await q('DELETE FROM spaces WHERE id = $1', req.params.id);
+    const to = req.query.moveTo;
+    if (to !== undefined) {
+      if (to === id) fail(400, 'Choose another space for the pages');
+      await needSpace(req.user.id, to, 'editor');
+    }
+    const members = await many('SELECT user_id FROM space_members WHERE space_id = $1', id);
+    let moved = 0;
+    await tx(async () => {
+      if (to !== undefined) {
+        // A space has one journal page per day: one that would clash becomes an ordinary dated page.
+        await q(`UPDATE notes m SET journal_date = NULL WHERE m.space_id = $1 AND m.journal_date IS NOT NULL AND EXISTS (
+          SELECT 1 FROM notes o WHERE o.space_id = $2 AND o.journal_date = m.journal_date AND o.deleted_at IS NULL)`, id, to);
+        // Top-level pages come after the target's own, in their order.
+        const base = (await one('SELECT coalesce(max(position), -1) + 1 AS p FROM notes WHERE space_id = $1 AND parent_id IS NULL', to)).p;
+        const lowest = (await one('SELECT coalesce(min(position), 0) AS p FROM notes WHERE space_id = $1 AND parent_id IS NULL', id)).p;
+        await q('UPDATE notes SET position = position - $2 + $3 WHERE space_id = $1 AND parent_id IS NULL', id, lowest, base);
+        moved = (await q('UPDATE notes SET space_id = $2 WHERE space_id = $1', id, to)).count;
+        await q('UPDATE assets SET space_id = $2 WHERE space_id = $1', id, to);
+      }
+      await q('DELETE FROM spaces WHERE id = $1', id);
+    });
+    if (to !== undefined) publish(to, 'tree:changed', {});
     for (const m of members) await refreshMembership(m.user_id);
-    return { ok: true };
+    return { ok: true, moved };
   });
 
   // ---- members

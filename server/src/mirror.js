@@ -7,7 +7,7 @@ import { config } from './config.js';
 import { createSpace } from './spaces.js';
 import { refreshMembership } from './events.js';
 
-// The empty "Work" every new account starts with gives way to the mirror of that name; anything with pages or other
+// An empty space of the same name (older accounts started with an empty "Work") gives way to the mirror of that name; anything with pages or other
 // members stays, however it is named.
 async function dropEmptyTwin(userId, name, keep) {
   const twin = await one(`SELECT s.id FROM spaces s WHERE s.owner_id = $1 AND lower(s.name) = lower($2) AND s.id <> $3 AND s.settings_json->>'halcyonShared' IS NULL

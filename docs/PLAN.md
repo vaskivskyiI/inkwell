@@ -16,13 +16,13 @@ multi-device co-editing, shared spaces and integration with Halcyon (mail, calen
 ## 2. Feature set
 
 ### Organisation
-- **Spaces**: every user gets *Private* and *Work* on sign-up; create/rename/recolour/delete; share a space with other
+- **Spaces**: every user starts with one, *My space*; create/rename/recolour/delete (its pages can move to another space first); share a space with other
   users by e-mail with a role (owner · editor · commenter · viewer). Switch spaces from the sidebar (Ctrl+1…9).
 - **Page tree**: pages nest without limit (OneNote notebook → section → page = page → child pages). Drag & drop to
   reorder / re-parent, collapse state remembered per device. Favourites, recent pages, trash with restore (30 days).
 - **Two page kinds**: *Page* (rich text with embedded ink/drawing blocks) and *Journal* (pen-first: endless ruled/grid/
   dotted/plain paper, typed text boxes). Both can be mixed in a tree.
-- **Daily journal**: "Today" opens (or creates) the day's journal page in the Private space.
+- **Daily journal**: "Today" opens (or creates) the day's journal page in the journal space chosen in Settings (else the first own space).
 - **Templates**: meeting notes, daily plan, project brief, 1:1, lecture notes; "New meeting note" from a Halcyon event.
 - **Tags** (#tag in text and AI-suggested), backlinks (`[[` page mentions), public read-only share link per page.
 - **Version history**: snapshots while editing (at most every 10 minutes and on last disconnect), preview and restore.

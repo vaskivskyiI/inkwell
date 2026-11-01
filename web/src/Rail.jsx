@@ -1,5 +1,5 @@
 // The narrow bar on the left, the same as Halcyon's: apps, command palette, space, theme, settings.
-import { NotebookPen, Mail, CalendarDays, CheckSquare, Sparkles, Command, Layers, Settings, Sun, Moon, SunMoon, Plus, Users, Check, Bell as Bell2, Home, Columns2, LogOut } from 'lucide-react';
+import { NotebookPen, Mail, CalendarDays, CheckSquare, Sparkles, Command, Layers, Settings, Sun, Moon, SunMoon, Plus, Users, Check, Trash2, Bell as Bell2, Home, Columns2, LogOut } from 'lucide-react';
 import { embedUrl, openBeside } from './SidePane.jsx';
 import { get, post } from './api.js';
 import { store, useStore, navigate, localGet } from './store.js';
@@ -19,6 +19,7 @@ function SpaceButton() {
     ...spaces.map((s) => ({ label: `${s.icon || '•'} ${s.name}${s.members > 1 ? ' 👥' : ''}`, icon: s.id === spaceId ? Check : undefined, onClick: () => switchSpace(s.id) })),
     { label: 'New space…', icon: Plus, onClick: async () => { const name = window.prompt('Name of the new space'); if (name) { const s = await post('/api/spaces', { name }); await loadSpaces(); switchSpace(s.id); } } },
     { label: 'Members & sharing…', icon: Users, onClick: () => navigate(`#/settings/spaces${current ? `?space=${current.id}` : ''}`) },
+    ...(current?.role === 'owner' ? [{ label: `Delete “${current.name}”…`, icon: Trash2, danger: true, onClick: () => navigate(`#/settings/spaces?space=${current.id}&delete=1`) }] : []),
   ];
   return (
     <Menu className={`space-btn${current ? ' active' : ''}`} align="up" label={current ? `Space: ${current.name}` : 'All spaces'} items={items}
