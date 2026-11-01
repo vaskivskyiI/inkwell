@@ -57,7 +57,9 @@ let toastId = 0;
 export function toast(text, { kind = 'info', duration = 3500, action } = {}) {
   const id = ++toastId;
   store.set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }));
-  setTimeout(() => store.set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), duration);
+  const dismiss = () => store.set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+  setTimeout(dismiss, duration);
+  return { dismiss };
 }
 export const toastError = (e) => toast(e?.message || String(e), { kind: 'error', duration: 6000 });
 

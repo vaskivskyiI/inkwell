@@ -27,15 +27,21 @@ export async function addCanvasImage(doc, canvasId, file, noteId, center) {
   try {
     const size = await naturalSize(file);
     const a = await upload(file, { noteId });
-    const id = sid();
-    const w = Math.min(500, size.w), ratio = size.h / size.w;
-    doc.transact(() => {
-      const m = new Y.Map();
-      for (const [k, v] of Object.entries({ canvas: canvasId, src: a.url, x: Math.max(0, Math.round(center.x - w / 2)), y: Math.max(0, Math.round(center.y - (w * ratio) / 2)), w, ratio, rot: 0, crop: [0, 0, 0, 0] })) m.set(k, v);
-      doc.getMap('images').set(id, m);
-    }, LOCAL);
+    const id = placeCanvasImage(doc, canvasId, a.url, size, center);
     store.set({ pickedImage: id, inkTool: { ...store.get().inkTool, tool: 'pick' } });
   } catch (e) { toastError(e); }
+}
+
+/** Puts an uploaded picture on a canvas, centred on `center` (logical units). */
+export function placeCanvasImage(doc, canvasId, src, size, center) {
+  const id = sid();
+  const w = Math.min(500, size?.w || 500), ratio = size?.w > 0 && size?.h > 0 ? size.h / size.w : 0.75;
+  doc.transact(() => {
+    const m = new Y.Map();
+    for (const [k, v] of Object.entries({ canvas: canvasId, src, x: Math.max(0, Math.round(center.x - w / 2)), y: Math.max(0, Math.round(center.y - (w * ratio) / 2)), w, ratio, rot: 0, crop: [0, 0, 0, 0] })) m.set(k, v);
+    doc.getMap('images').set(id, m);
+  }, LOCAL);
+  return id;
 }
 
 /** Insert space moves pictures below the line too. */

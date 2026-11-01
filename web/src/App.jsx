@@ -10,6 +10,7 @@ import { NoteView } from './NoteView.jsx';
 import { HomePage, SearchPage, TrashPage, AskPage, NewFromItem, SmartPage, ReviewPage } from './Pages.jsx';
 import { SettingsPage } from './Settings.jsx';
 import { CalendarPage } from './Calendar.jsx';
+import { QuickActions, CaptureSheet } from './QuickActions.jsx';
 import { Palette } from './Palette.jsx';
 import { Rail } from './Rail.jsx';
 import { AuthPage } from './Auth.jsx';
@@ -94,6 +95,8 @@ export function App() {
       </main>
       <SidePane />
       <Palette />
+      <QuickActions />
+      <CaptureSheet />
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.text}{t.action && <button onClick={t.action.onClick}>{t.action.label}</button>}</div>)}
       </div>

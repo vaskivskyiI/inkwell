@@ -260,6 +260,21 @@ const MIGRATIONS = [
   INSERT INTO note_edits (note_id, slot, user_id) SELECT note_id, created_at - created_at % 1800000, created_by FROM note_versions ON CONFLICT DO NOTHING;
   INSERT INTO note_edits (note_id, slot, user_id) SELECT id, updated_at - updated_at % 1800000, updated_by FROM notes WHERE updated_at > created_at + 60000 ON CONFLICT DO NOTHING;
   `,
+  // 7 — a photo taken on one device for the page open on another (capture.js): the page last worked on, and drops
+  // that the device showing the page claims (or the server places at the end)
+  `
+  ALTER TABLE users ADD COLUMN active_note uuid;
+  ALTER TABLE users ADD COLUMN active_at bigint;
+  CREATE TABLE drops (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    note_id uuid NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    asset_id uuid NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    claimed_at bigint,
+    created_at bigint NOT NULL
+  );
+  CREATE INDEX drops_created ON drops(created_at);
+  `,
 ];
 
 export async function migrate(db) {

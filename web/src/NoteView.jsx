@@ -1,11 +1,13 @@
 import { useEffect, useState, useRef } from 'react';
-import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2, MoveHorizontal, MessagesSquare, FileCode2 } from 'lucide-react';
+import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2, MoveHorizontal, MessagesSquare, FileCode2, Camera, Smartphone, Image as ImageIcon } from 'lucide-react';
 import { toggleFullscreen, toggleCanvasFullscreen, pageCanvas } from './ui/fullscreen.js';
 import { get, post, put, patch, del } from './api.js';
 import { store, useStore, findNote, openNote, navigate, toast, toastError, localSet } from './store.js';
 import { openDoc, onEvent, loadFavorites, forgetDoc, moveToSpace } from './data.js';
 import { PageEditor } from './editor/Editor.jsx';
 import { MarkdownSource } from './editor/MarkdownSource.jsx';
+import { photoTo, requestPhoto, touchDevice, useActivePage } from './capture.js';
+import { useNarrow } from './QuickActions.jsx';
 import { JournalView } from './ink/JournalView.jsx';
 import { useYText } from './ui/ytext.js';
 import { Menu } from './ui/Menu.jsx';
@@ -64,6 +66,8 @@ export function NoteView({ id }) {
     window.addEventListener('inkwell:comment', onComment);
     return () => { clearTimeout(t); h.provider.off('synced', show); off(); meta.unobserve(onMeta); window.removeEventListener('inkwell:comment', onComment); h.release(); };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useActivePage(id, !!detail && ['owner', 'editor'].includes(detail.role) && !detail.deletedAt);
 
   if (error) return <div className="empty-state"><h2>{error.status === 404 ? 'Page not found' : 'Could not open the page'}</h2><p>{error.message}</p><button onClick={() => navigate('#/')}>Go home</button></div>;
   if (!detail || !handle) return <div className="note-loading"><span className="spinner" /></div>;
@@ -148,6 +152,8 @@ function NoteHeader({ detail, setDetail, handle, readOnly, wide }) {
   };
   const penLayer = useStore((s) => s.penLayer);
   const mdSource = useStore((s) => s.mdSource);
+  const narrow = useNarrow(700);
+  const touch = touchDevice();
   const child = async (kind) => openNote((await post('/api/notes', { spaceId: detail.spaceId, parentId: detail.id, kind })).id);
   const items = [
     { label: detail.favorite ? 'Remove from favourites' : 'Add to favourites', icon: Star, onClick: toggleFav },
@@ -171,6 +177,20 @@ function NoteHeader({ detail, setDetail, handle, readOnly, wide }) {
     { label: 'Version history', icon: History, onClick: () => setPanel('history') },
     { label: 'Move to trash', icon: Trash2, danger: true, hidden: readOnly, onClick: async () => { await del(`/api/notes/${detail.id}`); forgetDoc(detail.id); toast('Moved to the trash', { action: { label: 'Undo', onClick: () => post(`/api/notes/${detail.id}/restore`).then(() => openNote(detail.id)) } }); navigate('#/'); } },
   ].filter((i) => !i.hidden);
+  const fullscreen = (e) => { const view = e?.currentTarget?.closest?.('.note-view') || document.querySelector('.note-view'); const canvas = pageCanvas(view); if (canvas || view.dataset.canvasFull) toggleCanvasFullscreen(canvas || view.querySelector('[data-canvas-target]')); else toggleFullscreen(view); };
+  // On a phone only the `keep` ones stay in the bar; the others move into the menu.
+  const buttons = [
+    { label: wide ? 'Fixed width' : 'Full width', icon: MoveHorizontal, on: wide, hidden: detail.kind !== 'page', onClick: () => handle.doc.getMap('meta').set('wide', !wide) },
+    { label: 'Full screen', icon: Maximize2, onClick: fullscreen },
+    { label: 'Edit as Markdown', icon: FileCode2, on: mdSource === detail.id, hidden: detail.kind !== 'page' || readOnly, onClick: () => store.set({ mdSource: mdSource === detail.id ? null : detail.id }) },
+    { label: 'Write by hand on top of this page', icon: PenLine, on: penLayer, keep: true, hidden: detail.kind !== 'page' || readOnly, onClick: () => store.set({ penLayer: !penLayer }) },
+    { label: 'Favourite', icon: Star, cls: detail.favorite ? 'fav' : '', hidden: narrow, onClick: toggleFav },
+    { label: 'AI insights', icon: Sparkles, on: panel === 'ai', keep: true, onClick: () => setPanel('ai') },
+    { label: 'Links (mail, events, tasks, pages)', icon: Link2, on: panel === 'links', onClick: () => setPanel('links') },
+    { label: 'Comments', icon: MessagesSquare, on: panel === 'comments', onClick: () => setPanel('comments') },
+    { label: 'Ask AI about your notes', icon: MessageSquare, on: panel === 'ask', onClick: () => setPanel('ask') },
+  ];
+  const menu = narrow ? [...buttons.filter((b) => !b.hidden && !b.keep && b.label !== 'Favourite').map((b) => ({ label: b.label, icon: b.icon, onClick: b.onClick })), ...items] : items;
   return (
     <header className="note-header">
       <Breadcrumbs detail={detail} />
@@ -178,16 +198,14 @@ function NoteHeader({ detail, setDetail, handle, readOnly, wide }) {
         {!online && <span className="offline" title="Offline — changes are kept on this device and sync when you're back"><WifiOff size={15} /> Offline</span>}
         {readOnly && !detail.deletedAt && <span className="readonly" title="You can view this page"><Eye size={15} /> View only</span>}
         <Presence provider={handle.provider} />
-        {detail.kind === 'page' && <button className={`icon${wide ? ' on' : ''}`} onClick={() => handle.doc.getMap('meta').set('wide', !wide)} title={wide ? 'Fixed width' : 'Full width'} aria-label={wide ? 'Fixed width' : 'Full width'}><MoveHorizontal size={18} /></button>}
-        <button className="icon" onClick={(e) => { const view = e.currentTarget.closest('.note-view'); const canvas = pageCanvas(view); if (canvas || view.dataset.canvasFull) toggleCanvasFullscreen(canvas || view.querySelector('[data-canvas-target]')); else toggleFullscreen(view); }} title="Full screen" aria-label="Full screen"><Maximize2 size={18} /></button>
-        {detail.kind === 'page' && !readOnly && <button className={`icon${mdSource === detail.id ? ' on' : ''}`} onClick={() => store.set({ mdSource: mdSource === detail.id ? null : detail.id })} title="Edit as Markdown" aria-label="Edit as Markdown"><FileCode2 size={18} /></button>}
-        {detail.kind === 'page' && !readOnly && <button className={`icon${penLayer ? ' on' : ''}`} onClick={() => store.set({ penLayer: !penLayer })} title="Write by hand on top of this page" aria-label="Pen on page"><PenLine size={18} /></button>}
-        <button className={`icon${detail.favorite ? ' fav' : ''}`} onClick={toggleFav} title="Favourite" aria-label="Favourite"><Star size={18} /></button>
-        <button className={`icon${panel === 'ai' ? ' on' : ''}`} onClick={() => setPanel('ai')} title="AI insights" aria-label="AI insights"><Sparkles size={18} /></button>
-        <button className={`icon${panel === 'links' ? ' on' : ''}`} onClick={() => setPanel('links')} title="Links (mail, events, tasks, pages)" aria-label="Links"><Link2 size={18} /></button>
-        <button className={`icon${panel === 'comments' ? ' on' : ''}`} onClick={() => setPanel('comments')} title="Comments" aria-label="Comments"><MessagesSquare size={18} /></button>
-        <button className={`icon${panel === 'ask' ? ' on' : ''}`} onClick={() => setPanel('ask')} title="Ask AI about your notes" aria-label="Ask AI"><MessageSquare size={18} /></button>
-        <Menu items={items} trigger={<MoreHorizontal size={18} />} label="Page menu" />
+        {!readOnly && (touch
+          ? <button className="icon" onClick={() => photoTo(detail)} title="Take a photo for this page" aria-label="Take a photo"><Camera size={18} /></button>
+          : <Menu label="Photo" trigger={<Camera size={18} />} items={[
+            { label: 'Take it with my phone', icon: Smartphone, onClick: () => requestPhoto(detail) },
+            { label: 'Picture from this computer', icon: ImageIcon, onClick: () => photoTo(detail, { camera: false }) },
+          ]} />)}
+        {buttons.filter((b) => !b.hidden && (!narrow || b.keep)).map((b) => <button key={b.label} className={`icon${b.on ? ' on' : ''}${b.cls ? ` ${b.cls}` : ''}`} onClick={b.onClick} title={b.label} aria-label={b.label}><b.icon size={18} /></button>)}
+        <Menu items={menu} trigger={<MoreHorizontal size={18} />} label="Page menu" />
       </div>
     </header>
   );

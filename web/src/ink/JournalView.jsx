@@ -8,7 +8,8 @@ import { sid } from './geometry.js';
 import { useYObserve, applyText } from '../ui/ytext.js';
 import { post } from '../api.js';
 import { Markdown } from '../ui/Markdown.jsx';
-import { addCanvasImage } from './CanvasImages.jsx';
+import { addCanvasImage, placeCanvasImage } from './CanvasImages.jsx';
+import { useDrops } from '../capture.js';
 import { toast, toastError, useStore, openNote } from '../store.js';
 
 const PAPERS = [['ruled', 'Ruled'], ['grid', 'Grid'], ['dotted', 'Dotted'], ['plain', 'Plain']];
@@ -31,6 +32,9 @@ export function JournalView({ note, doc, readOnly }) {
   }, [meta, height]);
 
   const grow = (h) => { setHeight(h); if (!readOnly) meta.set('height', h); };
+
+  // A photo from another device: in the middle of what this screen shows.
+  useDrops(note.id, (url, size) => placeCanvasImage(doc, 'page', url, size, canvas.current?.viewCenter() || { x: 500, y: 200 }), !readOnly);
 
   const addBox = (x, y) => {
     const id = sid();

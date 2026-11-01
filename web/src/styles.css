@@ -111,14 +111,14 @@ code.select { user-select: all; word-break: break-all; }
 .ai-menu { position: absolute; top: 100%; left: 0; margin-top: 4px; width: 230px; }
 
 /* ---------- note view */
-.note-view { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto 1fr; height: 100%; min-height: 0; }
+.note-view { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto 1fr; height: 100%; min-height: 0; }
 .note-header { grid-column: 1 / 2; display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 16px; min-height: 48px; border-bottom: 1px solid transparent; }
 .no-sidebar .note-header { padding-left: 48px; }
 .crumbs { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 13.5px; color: var(--muted); }
 .crumb { color: var(--muted); padding: 2px 6px; border-radius: 5px; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .crumb:hover { background: var(--bg-hover); color: var(--fg); }
 .crumb-wrap { display: inline-flex; align-items: center; min-width: 0; }
-.note-actions { display: flex; align-items: center; gap: 2px; }
+.note-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 .note-actions .fav { color: #eab308; }
 .offline, .readonly { display: inline-flex; gap: 5px; align-items: center; font-size: 12.5px; color: var(--warn); margin-right: 6px; }
 .readonly { color: var(--muted); }
@@ -556,3 +556,24 @@ table.members td:first-child { display: flex; align-items: center; gap: 8px; }
 .cal-row .ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 label.check { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 600px) { .cal-head { margin-top: 34px; } .cal-head h1 { font-size: 22px; } .cal-day { min-height: 46px; padding: 4px; } .cal-marks { flex-direction: column; gap: 0; font-size: 11px; } }
+
+/* wide content scrolls inside the page, not the page itself */
+.prose .tableWrapper { overflow-x: auto; max-width: 100%; }
+.prose img { max-width: 100%; height: auto; }
+.prose a { overflow-wrap: anywhere; }
+.title-input { min-width: 0; }
+@media (max-width: 700px) { .prose table { table-layout: auto; width: max-content; min-width: 100%; } .prose td, .prose th { min-width: 90px; } .note-header { gap: 4px; padding-right: 6px; } .presence .avatar:nth-child(n+3) { display: none; } }
+
+/* ---------- quick actions (touch screens, narrow windows) and a photo asked for by another device */
+.qa-fab { position: fixed; right: 18px; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 80; width: 54px; height: 54px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; box-shadow: var(--shadow); display: inline-flex; align-items: center; justify-content: center; }
+.qa-scrim { position: fixed; inset: 0; z-index: 78; background: rgba(0, 0, 0, .18); }
+.qa-menu { position: fixed; right: 18px; bottom: calc(82px + env(safe-area-inset-bottom)); z-index: 79; width: min(340px, calc(100vw - 36px)); background: var(--bg-raised); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.qa-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 8px 12px; border: 0; background: transparent; border-radius: 10px; text-align: left; justify-content: flex-start; font-size: 15px; color: var(--fg); }
+.qa-item:hover { background: var(--bg-hover); }
+.qa-item.lead { background: var(--accent-soft); }
+.qa-hint { display: block; font-size: 12px; color: var(--muted); }
+.qa-wait { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+.capture-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 90; background: var(--bg-raised); border-top: 1px solid var(--border); box-shadow: var(--shadow); border-radius: 16px 16px 0 0; padding: 18px 18px calc(18px + env(safe-area-inset-bottom)); }
+.capture-title { font-size: 17px; }
+.capture-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.capture-buttons .big { flex: 1 1 100%; min-height: 52px; font-size: 17px; justify-content: center; }

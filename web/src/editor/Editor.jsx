@@ -20,11 +20,13 @@ import { store, useStore, navigate, openNote, toast, toastError } from '../store
 import { Markdown } from '../ui/Markdown.jsx';
 import { sid } from '../ink/geometry.js';
 import { allowKeyboard } from '../ink/keyboard.js';
+import { useDrops } from '../capture.js';
 
 const looksLikeMarkdown = (t) => /(^|\n)(#{1,6} |[-*+] |\d+\. |```|> |\|.*\|)/.test(t);
 
 export function PageEditor({ note, doc, provider, user, readOnly }) {
   const capture = useRef(null);
+  const touched = useRef(false); // the cursor is somewhere the person put it (else photos go to the end)
   const fileInput = useRef(null);
   const photoInput = useRef(null);
   const pdfInput = useRef(null);
@@ -107,6 +109,7 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
       InkBlock.configure({ doc, noteId: note.id }), AudioBlock.configure({ noteId: note.id }), Callout, PageMention, KeyCapture.configure({ onKey: (e) => capture.current?.(e) }),
     ],
     editable: !readOnly,
+    onFocus: () => { touched.current = true; },
     editorProps: {
       attributes: { class: 'prose', spellcheck: 'true' },
       handlePaste: (view, event) => {
@@ -161,6 +164,15 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
   }, [doc, provider, readOnly]);
   const editorRef = useRef(null);
   editorRef.current = editor;
+
+  // A photo from another device: after the block the cursor is in, without taking the focus.
+  useDrops(note.id, (url, _size, name) => {
+    const e = editorRef.current;
+    if (!e || e.isDestroyed) return;
+    const { $to } = e.state.selection;
+    const pos = touched.current ? ($to.depth >= 1 ? $to.after(1) : $to.pos) : e.state.doc.content.size;
+    e.chain().insertContentAt(pos, [{ type: 'image', attrs: { src: url, alt: name || '' } }, { type: 'paragraph' }]).run();
+  }, !readOnly);
 
   // Set the awareness name/colour once more (the caret extension sends it on connect).
   useEffect(() => { editor?.commands.updateUser?.({ name: user.name, color: user.color }); }, [editor, user.name, user.color]);

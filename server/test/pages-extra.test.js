@@ -95,3 +95,46 @@ test('calendar: pages created and worked on in a range, only my work, other peop
   assert.ok(!(await ann.get(`/api/calendar?from=${t0 - 30 * 864e5}&to=${t0 - 20 * 864e5}`)).some((x) => x.id === p.id));
   assert.equal(await ann.status('GET', '/api/calendar?from=1&to=0'), 400);
 });
+
+test('photo from another device: active page, request, drop claimed by a device or placed at the end', async () => {
+  const sid = space(ann, 'Work').id;
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201e2216bc50000000049454e44ae426082', 'hex');
+  const page = await ann.post('/api/notes', { spaceId: sid, title: 'Lecture' });
+  const journal = await ann.post('/api/notes', { spaceId: sid, title: 'Sketches', kind: 'journal' });
+  const uploadTo = async (noteId) => {
+    const m = multipart({ noteId }, 'photo.png', png, 'image/png');
+    return JSON.parse((await app.inject({ method: 'POST', url: '/api/assets', payload: m.payload, headers: { cookie: ann.cookie, 'content-type': m['content-type'] } })).body);
+  };
+
+  assert.equal((await ann.get('/api/capture/target')).target, null);
+  await ann.post('/api/me/active', { noteId: page.id });
+  assert.equal((await ann.get('/api/capture/target')).target.title, 'Lecture');
+  assert.equal(await bob.status('POST', '/api/me/active', { noteId: page.id }), 404);
+  assert.equal((await bob.get('/api/capture/target')).target, null);
+  await ann.post(`/api/notes/${page.id}/capture-request`, { from: 'desk' });
+
+  // A device showing the page claims the drop: the server leaves the page alone.
+  const a1 = await uploadTo(page.id);
+  const pending = ann.post(`/api/notes/${page.id}/drop`, { assetId: a1.id, w: 400, h: 300 });
+  const { one } = await import('../src/db/index.js');
+  const drop = await waitFor(() => one('SELECT id FROM drops WHERE asset_id = $1', a1.id));
+  assert.equal((await ann.post(`/api/drops/${drop.id}/claim`)).ok, true);
+  assert.equal((await ann.post(`/api/drops/${drop.id}/claim`)).ok, false);
+  assert.equal(await bob.post(`/api/drops/${drop.id}/claim`).then((r) => r.ok), false);
+  assert.equal((await pending).placed, 'device');
+  assert.doesNotMatch(await ann.get(`/api/notes/${page.id}/export`), /api\/assets/);
+
+  // Nobody claims it: at the end of the page, or on the journal's paper below everything.
+  const a2 = await uploadTo(page.id);
+  assert.equal((await ann.post(`/api/notes/${page.id}/drop`, { assetId: a2.id, w: 400, h: 300, wait: false })).placed, 'end');
+  assert.ok((await ann.get(`/api/notes/${page.id}/export`)).includes(`](/api/assets/${a2.id})`), 'picture at the end');
+  const a3 = await uploadTo(journal.id);
+  assert.equal((await ann.post(`/api/notes/${journal.id}/drop`, { assetId: a3.id, w: 400, h: 200, wait: false })).placed, 'end');
+  const { withDoc } = await import('../src/collab.js');
+  await withDoc(journal.id, (d) => {
+    const [img] = [...d.getMap('images').values()];
+    assert.equal(img.get('src'), `/api/assets/${a3.id}`);
+    assert.equal(img.get('ratio'), 0.5);
+  }, ann.user);
+  assert.equal(await bob.status('POST', `/api/notes/${page.id}/drop`, { assetId: a2.id }), 404);
+});

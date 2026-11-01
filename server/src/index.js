@@ -20,6 +20,7 @@ import { mirrorSpaces } from './mirror.js';
 import halcyonRoutes from './integrations/halcyon.js';
 import importRoutes from './importers/index.js';
 import commentRoutes from './comments.js';
+import captureRoutes, { purgeDrops } from './capture.js';
 import { pullAll } from './tasksync.js';
 import { handleSocket, stopCollab } from './collab.js';
 import { initEvents, addClient } from './events.js';
@@ -69,6 +70,7 @@ export async function buildServer() {
   await app.register(halcyonRoutes);
   await app.register(importRoutes);
   await app.register(commentRoutes);
+  await app.register(captureRoutes);
 
   // Page content (Yjs / Hocuspocus protocol). Native apps pass ?token=<api token>.
   app.register(async (scope) => {
@@ -104,7 +106,7 @@ export async function buildServer() {
 }
 
 function housekeeping() {
-  const run = () => { purgeTrash().catch((e) => log.warn('trash purge', e.message)); collectAssets().then(deleteOrphanFiles).catch((e) => log.warn('unused files', e.message)); };
+  const run = () => { purgeTrash().catch((e) => log.warn('trash purge', e.message)); purgeDrops().catch(() => {}); collectAssets().then(deleteOrphanFiles).catch((e) => log.warn('unused files', e.message)); };
   setTimeout(run, 60e3).unref();
   setInterval(run, 6 * 3600e3).unref();
   // Tasks completed in Halcyon tick their to-dos here.
