@@ -3,8 +3,8 @@
 import * as Y from 'yjs';
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider';
 import { IndexeddbPersistence } from 'y-indexeddb';
-import { get, patch } from './api.js';
-import { store, setTree, patchNote, removeNotes, localSet, toast } from './store.js';
+import { get, post, patch, del } from './api.js';
+import { store, setTree, patchNote, removeNotes, localSet, toast, findNote } from './store.js';
 
 const wsUrl = (path) => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`;
 
@@ -110,9 +110,37 @@ export function forgetDoc(noteId) {
 }
 
 /** Moves a page and its sub-pages; pages put in a space with other people need a yes first. */
-export async function moveToSpace(id, space, place = {}) {
-  if (space.members > 1 && !window.confirm(`Move this page and its sub-pages to “${space.name}”? Its ${space.members} members will see them.`)) return false;
-  await patch(`/api/notes/${id}`, { ...place, spaceId: space.id });
-  toast(`Moved to ${space.name}`);
+export const moveToSpace = (id, space, place = {}) => movePages([id], space, place);
+
+/** Selected pages without those whose parent (or grand-parent…) is selected too: they move along anyway. */
+export function topLevel(ids) {
+  const set = new Set(ids);
+  return ids.filter((id) => {
+    for (let n = findNote(id), seen = 0; n?.parentId && seen < 100; n = findNote(n.parentId), seen++) if (set.has(n.parentId)) return false;
+    return true;
+  });
+}
+
+/** Puts pages (with their sub-pages) at one place, in the given order: into `parentId`, after `afterId`, in `space`. */
+export async function movePages(ids, space, place = {}) {
+  ids = topLevel(ids);
+  const away = ids.filter((id) => findNote(id)?.spaceId !== space.id);
+  const what = ids.length > 1 ? `these ${ids.length} pages and their sub-pages` : 'this page and its sub-pages';
+  if (away.length && space.members > 1 && !window.confirm(`Move ${what} to “${space.name}”? Its ${space.members} members will see them.`)) return false;
+  let afterId = place.afterId;
+  for (const id of ids) {
+    await patch(`/api/notes/${id}`, { ...place, ...(afterId !== undefined && { afterId }), ...(away.includes(id) && { spaceId: space.id }) });
+    if (place.afterId !== undefined) afterId = id;
+  }
+  if (away.length) toast(ids.length > 1 ? `Moved ${ids.length} pages to ${space.name}` : `Moved to ${space.name}`);
   return true;
+}
+
+export async function trashPages(ids) {
+  ids = topLevel(ids);
+  for (const id of ids) { await del(`/api/notes/${id}`); forgetDoc(id); }
+  toast(ids.length > 1 ? `${ids.length} pages moved to the trash` : 'Moved to the trash', {
+    action: { label: 'Undo', onClick: () => Promise.all(ids.map((id) => post(`/api/notes/${id}/restore`))) },
+  });
+  return ids;
 }

@@ -63,14 +63,24 @@ function blocksMd(parent, ctx) {
   return parent.toArray().map((c) => blockMd(c, ctx)).filter((s) => s !== null && s !== '').join('\n\n');
 }
 
+// Blocks Markdown has no words for, kept as they are when a page is edited as Markdown.
+const KEEP_LABEL = { inkBlock: '✍️ handwriting', audioBlock: '🎙️ recording' };
+const KNOWN = new Set(['paragraph', 'heading', 'blockquote', 'callout', 'bulletList', 'orderedList', 'taskList', 'listItem', 'taskItem', 'codeBlock', 'horizontalRule', 'image', 'table']);
+
 function blockMd(el, ctx) {
   if (el instanceof Y.XmlText) return inlineMd({ toArray: () => [el] }, ctx);
   const n = el.nodeName;
+  if (ctx.keep && (KEEP_LABEL[n] || !KNOWN.has(n))) {
+    ctx.keep.push(yToJson(el));
+    return `<!-- keep:${ctx.keep.length - 1} ${KEEP_LABEL[n] || n} — leave this line to keep it -->`;
+  }
   switch (n) {
     case 'paragraph': return inlineMd(el, ctx);
     case 'heading': return ctx.plain ? inlineMd(el, ctx) : `${'#'.repeat(Number(el.getAttribute('level')) || 1)} ${inlineMd(el, ctx)}`;
     case 'blockquote': return prefixLines(blocksMd(el, ctx), ctx.plain ? '' : '> ', ctx.plain ? '' : '> ');
-    case 'callout': return prefixLines(blocksMd(el, ctx), ctx.plain ? '' : `> ${el.getAttribute('emoji') || '💡'} `, ctx.plain ? '' : '> ');
+    case 'callout':
+      if (ctx.keep) return prefixLines(`[!${el.getAttribute('emoji') || '💡'}]\n${blocksMd(el, ctx)}`, '> ', '> ');
+      return prefixLines(blocksMd(el, ctx), ctx.plain ? '' : `> ${el.getAttribute('emoji') || '💡'} `, ctx.plain ? '' : '> ');
     case 'bulletList': case 'orderedList': case 'taskList':
       return el.toArray().map((item, i) => {
         const mark = n === 'orderedList' ? `${i + 1}. ` : n === 'taskList' ? `- [${item.getAttribute?.('checked') ? 'x' : ' '}] ` : '- ';
@@ -110,6 +120,34 @@ function blockMd(el, ctx) {
     }
     default: return el.toArray ? blocksMd(el, ctx) : '';
   }
+}
+
+function yToJson(el) {
+  const node = { type: el.nodeName, attrs: el.getAttributes() };
+  const content = el.toArray().flatMap((c) => (c instanceof Y.XmlText
+    ? c.toDelta().filter((op) => typeof op.insert === 'string').map((op) => ({ type: 'text', text: op.insert, ...(op.attributes && { marks: Object.entries(op.attributes).map(([type, attrs]) => ({ type, attrs })) }) }))
+    : [yToJson(c)]));
+  if (content.length) node.content = content;
+  return node;
+}
+
+/**
+ * The page body as Markdown to edit by hand. Callouts become `> [!💡]` alerts; blocks Markdown cannot hold (handwriting,
+ * recordings…) become `<!-- keep:N -->` lines, their editor JSON in `keep`, so writing the Markdown back keeps them.
+ */
+export function editableMarkdown(ydoc) {
+  const keep = [];
+  const markdown = blocksMd(ydoc.getXmlFragment('default'), { keep });
+  return { markdown, keep };
+}
+
+/** Replaces the page body with Markdown (from editableMarkdown, edited). */
+export function replaceBody(ydoc, blocks, origin) {
+  ydoc.transact(() => {
+    const frag = ydoc.getXmlFragment('default');
+    frag.delete(0, frag.length);
+    frag.insert(0, orParagraph(blocks).map(toY));
+  }, origin);
 }
 
 export function strokesOf(ydoc, canvasId) {
@@ -275,7 +313,11 @@ function inlineFromMd(s) {
 
 const para = (text) => ({ type: 'paragraph', content: inlineFromMd(text) });
 
-export function markdownToBlocks(md) {
+const orParagraph = (blocks) => (blocks.length ? blocks : [{ type: 'paragraph' }]);
+const ALERT = { NOTE: 'ℹ️', TIP: '💡', IMPORTANT: '❗', WARNING: '⚠️', CAUTION: '🛑' };
+
+/** `keep`: the blocks `<!-- keep:N -->` lines stand for (see editableMarkdown); other HTML comments are dropped. */
+export function markdownToBlocks(md, keep) {
   const lines = String(md || '').replace(/\r\n?/g, '\n').split('\n');
   const blocks = [];
   let i = 0;
@@ -284,7 +326,13 @@ export function markdownToBlocks(md) {
     const line = lines[i];
     if (!line.trim()) { i++; continue; }
     let m;
-    if ((m = /^```\s*([\w+-]*)/.exec(line))) {
+    if ((m = /^\s*<!--\s*keep:(\d+)\b.*-->\s*$/.exec(line))) {
+      const b = keep?.[Number(m[1])];
+      if (b && typeof b === 'object' && typeof b.type === 'string') blocks.push(b);
+      i++;
+    } else if (/^\s*<!--.*-->\s*$/.test(line)) {
+      i++;
+    } else if ((m = /^```\s*([\w+-]*)/.exec(line))) {
       const code = [];
       i++;
       while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]);
@@ -302,7 +350,10 @@ export function markdownToBlocks(md) {
     } else if (/^\s*>/.test(line)) {
       const q = [];
       while (i < lines.length && /^\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\s*>\s?/, ''));
-      blocks.push({ type: 'blockquote', content: markdownToBlocks(q.join('\n')) });
+      // `> [!💡]` or GitHub's `> [!NOTE]`: a callout.
+      const alert = /^\[!([^\]\s]{1,12})\]\s*(.*)$/u.exec(q[0]);
+      if (alert) blocks.push({ type: 'callout', attrs: { emoji: ALERT[alert[1].toUpperCase()] || alert[1] }, content: orParagraph(markdownToBlocks([alert[2], ...q.slice(1)].join('\n'), keep)) });
+      else blocks.push({ type: 'blockquote', content: markdownToBlocks(q.join('\n'), keep) });
     } else if (/^\s*\|.*\|\s*$/.test(line)) {
       const rows = [];
       while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(lines[i++]);

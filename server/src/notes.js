@@ -6,10 +6,11 @@ import { fail, str, isUuid } from './util/http.js';
 import { randomToken } from './util/crypto.js';
 import { needSpace, needNote, userSpaceIds } from './spaces.js';
 import { publish } from './events.js';
-import { buildDoc, encode, docFrom, markdownToBlocks, appendBlocks, setTitle, extract } from './docmodel.js';
+import { buildDoc, encode, docFrom, markdownToBlocks, appendBlocks, setTitle, extract, editableMarkdown, replaceBody } from './docmodel.js';
+import { sha256 } from './util/crypto.js';
 import { pageHtml } from './html.js';
 import { TEMPLATES, WELCOME_MD } from './templates.js';
-import { withDoc, recognitionsOf, syncAssetRefs } from './collab.js';
+import { withDoc, readDoc, recognitionsOf, syncAssetRefs } from './collab.js';
 import { getSettings } from './settings.js';
 import { enqueue } from './ai/queue.js';
 import { config } from './config.js';
@@ -89,6 +90,35 @@ export async function noteDetail(userId, id) {
     backlinks,
     ink: Object.fromEntries(ink.map((r) => [r.canvas_id, { text: r.text, data: r.data_json, updatedAt: r.updated_at, error: r.error }])),
   };
+}
+
+/** `[[Title]]` / `[[Title#Heading]]` in typed Markdown → links to those pages (this space first, then the user's others). */
+async function linkMentions(userId, spaceId, blocks) {
+  const RE = /\[\[([^\]#]+)(?:#([^\]]+))?\]\]/g;
+  const titles = new Set();
+  const walk = (nodes, fn) => nodes?.forEach((b) => { if (b.type === 'text') fn(b); else walk(b.content, fn); });
+  walk(blocks, (t) => { if (!t.marks?.some((m) => m.type === 'code')) for (const m of t.text.matchAll(RE)) titles.add(m[1].trim().toLowerCase()); });
+  if (!titles.size) return blocks;
+  const rows = await many(`SELECT id, title, space_id FROM notes WHERE space_id = ANY($1::uuid[]) AND deleted_at IS NULL AND lower(title) = ANY($2::text[])
+    ORDER BY (space_id = $3) DESC, updated_at DESC`, await userSpaceIds(userId), [...titles], spaceId);
+  const byTitle = new Map();
+  for (const r of rows) if (!byTitle.has(r.title.toLowerCase())) byTitle.set(r.title.toLowerCase(), r);
+  const split = (t) => {
+    if (t.marks?.some((m) => m.type === 'code')) return [t];
+    const out = [];
+    let last = 0;
+    for (const m of t.text.matchAll(RE)) {
+      const page = byTitle.get(m[1].trim().toLowerCase());
+      if (!page) continue;
+      if (m.index > last) out.push({ ...t, text: t.text.slice(last, m.index) });
+      out.push({ type: 'pageMention', attrs: { id: page.id, title: page.title, anchor: m[2]?.trim() || null } });
+      last = m.index + m[0].length;
+    }
+    if (last < t.text.length) out.push({ ...t, text: t.text.slice(last) });
+    return out;
+  };
+  const fix = (nodes) => nodes?.flatMap((b) => (b.type === 'text' ? split(b) : [{ ...b, ...(b.content && { content: fix(b.content) }) }]));
+  return fix(blocks);
 }
 
 async function markdownOf(noteId) {
@@ -245,6 +275,38 @@ export default async function noteRoutes(app) {
 
   // Markdown → editor JSON (the web editor inserts AI output and pasted Markdown with this).
   app.post('/api/markdown/blocks', async (req) => ({ blocks: markdownToBlocks(str(req.body?.markdown, 2e6)) }));
+
+  // Calendar of notes: pages created or worked on between `from` and `to` (epoch ms; the browser groups them into its
+  // own days). `mine=1`: only what this user created or edited.
+  app.get('/api/calendar', async (req) => {
+    const from = Number(req.query.from) || 0, to = Number(req.query.to) || 0;
+    if (!from || to <= from || to - from > 400 * 864e5) fail(400, 'Give a range of at most 400 days');
+    const spaces = req.query.space ? [await needSpace(req.user.id, req.query.space) && req.query.space] : await userSpaceIds(req.user.id);
+    const mine = req.query.mine === '1' ? req.user.id : null;
+    const rows = await many(`SELECT n.id, n.title, n.icon, n.kind, n.space_id, n.parent_id, n.created_at, n.created_by, n.updated_at,
+        coalesce(array_agg(DISTINCT e.slot) FILTER (WHERE e.slot IS NOT NULL), '{}') AS slots
+      FROM notes n LEFT JOIN note_edits e ON e.note_id = n.id AND e.slot >= $2::bigint - 1800000 AND e.slot < $3::bigint AND ($4::uuid IS NULL OR e.user_id = $4)
+      WHERE n.space_id = ANY($1::uuid[]) AND n.deleted_at IS NULL
+        AND ((n.created_at >= $2::bigint AND n.created_at < $3::bigint AND ($4::uuid IS NULL OR n.created_by = $4)) OR e.slot IS NOT NULL)
+      GROUP BY n.id ORDER BY n.updated_at DESC LIMIT 3000`, spaces, from, to, mine);
+    return rows.map((r) => ({ id: r.id, title: r.title, icon: r.icon, kind: r.kind, spaceId: r.space_id, parentId: r.parent_id,
+      createdAt: Number(r.created_at), updatedAt: Number(r.updated_at), edits: r.slots.map(Number).sort((a, b) => a - b) }));
+  });
+
+  // Editing a page as Markdown. `base` (the hash of the Markdown that was edited) catches a co-editor's change meanwhile.
+  app.get('/api/notes/:id/markdown', async (req) => {
+    const n = await needNote(req.user.id, req.params.id);
+    const { markdown, keep } = editableMarkdown(await readDoc(n.id));
+    return { markdown, keep, base: sha256(markdown) };
+  });
+  app.put('/api/notes/:id/markdown', async (req) => {
+    const n = await needNote(req.user.id, req.params.id, 'editor');
+    const keep = Array.isArray(req.body?.keep) ? req.body.keep.slice(0, 5000) : [];
+    if (req.body?.base && !req.body.force && sha256(editableMarkdown(await readDoc(n.id)).markdown) !== req.body.base) fail(409, 'Someone changed this page while you were editing the Markdown');
+    const blocks = await linkMentions(req.user.id, n.space_id, markdownToBlocks(str(req.body?.markdown, 2e6), keep));
+    await withDoc(n.id, (doc) => replaceBody(doc, blocks, 'rest'), req.user);
+    return { ok: true };
+  });
 
   // ---- favourites & recent
   app.get('/api/favorites', async (req) => (await many(`SELECT ${TREE_COLS} FROM favorites f JOIN notes n ON n.id = f.note_id

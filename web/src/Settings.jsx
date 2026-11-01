@@ -436,13 +436,15 @@ function Import() {
         <li>Choose it below. Headings, lists, to-dos, tables, code, callouts, images, files, links between docs and pen strokes from edgeless canvases are kept;
           docs embedded as linked cards become sub-pages. Database views arrive as plain lists; edgeless shapes are skipped.</li>
       </ol>
+      <h3>From OneNote</h3>
+      <p className="hint">A <code>.onepkg</code> notebook package (OneNote desktop: File → Export → Notebook), a <code>.one</code> section, or a <code>.zip</code> of a notebook folder. Handwritten pages become journals that keep their layout, with pictures and text boxes in place; typed pages become ordinary pages. Section groups, sections and sub-pages keep their order.</p>
       <h3>From Markdown, Notion or Obsidian</h3>
       <p className="hint">A single <code>.md</code> file or a <code>.zip</code> of them: folders become parent pages, relative images are uploaded, links between files become page links.</p>
       <Field label="Into space">
         <select value={spaceId} onChange={(e) => setSpaceId(e.target.value)}>{spaces.map((s) => <option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}</select>
       </Field>
       <Field label="File" hint="Everything lands under one new page “Imported from …”, which you can move or rename afterwards.">
-        <input type="file" accept=".affine,.zip,.md,.markdown" onChange={(e) => setFile(e.target.files[0] || null)} />
+        <input type="file" accept=".one,.onepkg,.affine,.zip,.md,.markdown" onChange={(e) => setFile(e.target.files[0] || null)} />
       </Field>
       <button className="primary" disabled={!file || !spaceId || busy} onClick={run}>{busy ? <><span className="spinner" /> Importing…</> : <><Upload size={15} /> Import</>}</button>
       {result && (

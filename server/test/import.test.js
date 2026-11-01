@@ -188,3 +188,25 @@ test('.affine workspace files, old and new layout', async () => {
   }
   await assert.rejects(upload(ann, 'other.affine', build((db) => db.exec('CREATE TABLE x (a)')), { spaceId: space }), /not an AFFiNE workspace/);
 });
+
+test('OneNote section: pages, checkboxes, formatting and handwriting', async () => {
+  const fs = await import('node:fs');
+  const space = ann.spaces.find((s) => s.name === 'Work').id;
+  const r = await upload(ann, 'handwriting_recognition.one', fs.readFileSync(new URL('./fixtures/onenote/handwriting_recognition.one', import.meta.url)), { spaceId: space });
+  assert.equal(r.format, 'onenote');
+  const { notes } = await ann.get(`/api/spaces/${space}/tree`);
+  const section = notes.find((n) => n.parentId === r.rootId);
+  assert.equal(section.title, 'handwriting_recognition');
+  const pages = notes.filter((n) => n.parentId === section.id);
+  assert.ok(pages.length);
+  const md = await ann.get(`/api/notes/${pages[0].id}/export`);
+  for (const re of [/# ABCDEF/, /- \[ \] ABCDEF/, /- \[x\] ABCDEFG/, /\*\*Important:\*\* ABCDEFGH/, /\*\*Lorem\*\* ipsum _dolor_/, /\[magna\]\(https:\/\/example\.com\)/, /\n {2}- Lorem/]) assert.match(md, re);
+  const { withDoc } = await import('../src/collab.js');
+  await withDoc(pages[0].id, (d) => {
+    const [strokes] = [...d.getMap('ink').values()];
+    assert.ok(strokes.length > 50, 'handwriting arrived');
+    assert.match(strokes.get(0).c, /^#[0-9a-f]{6}$/);
+    assert.equal(strokes.get(0).p.length % 3, 0);
+  }, ann.user);
+  await assert.rejects(upload(ann, 'broken.one', Buffer.from('not a OneNote file at all'), { spaceId: space }), /could not be read/);
+});

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FolderInput, ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass } from 'lucide-react';
-import { get, post, patch, del } from './api.js';
-import { store, useStore, openNote, navigate, toast, toastError, localGet, localSet, currentSpace } from './store.js';
-import { forgetDoc, onEvent, moveToSpace } from './data.js';
+import { FolderInput, X, CheckCheck, ArrowUpToLine, ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass } from 'lucide-react';
+import { get, post } from './api.js';
+import { store, useStore, openNote, navigate, toast, toastError, localGet, localSet, currentSpace, findNote } from './store.js';
+import { onEvent, moveToSpace, movePages, trashPages } from './data.js';
 import { Menu } from './ui/Menu.jsx';
 
 const expandedSet = new Set(JSON.parse(localGet('expanded') || '[]'));
@@ -21,7 +21,59 @@ export async function newPage({ kind = 'page', parentId = null, template } = {})
 }
 
 export async function openToday() {
-  try { openNote((await post('/api/journal', {})).id); } catch (e) { toastError(e); }
+  // This device's day, not the server's (UTC) one.
+  const d = new Date(), date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  try { openNote((await post('/api/journal', { date })).id); } catch (e) { toastError(e); }
+}
+
+// ---- several pages at once: Ctrl/⌘-click adds a page, Shift-click a range; while some are selected a click toggles.
+const setSelected = (ids) => store.set({ selected: ids });
+function clickSelect(e, id) {
+  const sel = store.get().selected;
+  if (!(e.ctrlKey || e.metaKey || e.shiftKey || sel.length)) return;
+  e.preventDefault();
+  if (e.shiftKey && sel.length) {
+    const rows = [...document.querySelectorAll('.sidebar .tree-row[data-id]')].map((r) => r.dataset.id);
+    const [a, b] = [rows.indexOf(sel.at(-1)), rows.indexOf(id)].sort((x, y) => x - y);
+    if (a >= 0) { setSelected([...new Set([...sel, ...rows.slice(a, b + 1)])]); return; }
+  }
+  // Ctrl-click with nothing selected yet starts the selection with the open page.
+  const route = store.get().route;
+  const base = !sel.length && route.name === 'n' && route.id !== id && findNote(route.id) ? [route.id] : sel;
+  setSelected(base.includes(id) ? base.filter((x) => x !== id) : [...base, id]);
+}
+if (typeof window !== 'undefined') window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && store.get().selected.length) setSelected([]); });
+
+function ancestorsOf(id) {
+  const out = [];
+  for (let n = findNote(id); n?.parentId && out.length < 100; n = findNote(n.parentId)) out.push(n.parentId);
+  return out;
+}
+
+function SelectionBar() {
+  const selected = useStore((s) => s.selected);
+  const spaces = useStore((s) => s.spaces);
+  if (!selected.length) return null;
+  const writable = spaces.filter((s) => ['owner', 'editor'].includes(s.role));
+  const canEdit = selected.map(findNote).every((n) => n && writable.some((s) => s.id === n.spaceId));
+  const run = (fn) => async () => { try { if (await fn() !== false) setSelected([]); } catch (e) { toastError(e); } };
+  const showAll = () => setSelected([...document.querySelectorAll('.sidebar .tree-row[data-id]')].map((r) => r.dataset.id));
+  const trash = async () => {
+    const open = store.get().route.id;
+    const ids = await trashPages(selected);
+    if (ids.some((id) => id === open || ancestorsOf(open).includes(id))) navigate('#/');
+  };
+  return (
+    <div className="select-bar" role="toolbar" aria-label="Selected pages">
+      <span className="grow"><b>{selected.length}</b> selected</span>
+      <button className="icon tiny" title="Select all shown pages" aria-label="Select all shown pages" onClick={showAll}><CheckCheck size={14} /></button>
+      {canEdit && <Menu label="Move to…" className="icon tiny" trigger={<FolderInput size={14} />} items={[
+        { label: 'Top level of space…', icon: ArrowUpToLine, submenu: writable.map((s) => ({ label: `${s.icon} ${s.name}`, onClick: run(() => movePages(selected, s, { parentId: null })) })) },
+      ]} />}
+      {canEdit && <button className="icon tiny" title="Move to trash" aria-label="Move to trash" onClick={run(trash)}><Trash2 size={14} /></button>}
+      <button className="icon tiny" title="Clear selection (Esc)" aria-label="Clear selection" onClick={() => setSelected([])}><X size={14} /></button>
+    </div>
+  );
 }
 
 export function Sidebar() {
@@ -31,6 +83,7 @@ export function Sidebar() {
   const favorites = useStore((s) => s.favorites);
   const route = useStore((s) => s.route);
   const halcyon = useStore((s) => s.halcyon);
+  const picking = useStore((s) => s.selected.length > 0);
   const space = spaces.find((s) => s.id === spaceId) || spaces[0];
   const all = spaceId === 'all';
   const canEdit = all ? spaces.some((x) => ['owner', 'editor'].includes(x.role)) : ['owner', 'editor'].includes(space?.role);
@@ -39,7 +92,7 @@ export function Sidebar() {
   const close = () => { if (window.innerWidth < 800) store.set({ sidebar: false }); };
 
   return (
-    <nav className="sidebar" onClick={(e) => { if (e.target.closest('a,.tree-row,.nav-item')) close(); }}>
+    <nav className="sidebar" onClick={(e) => { if (!e.defaultPrevented && e.target.closest('a,.tree-row,.nav-item')) close(); }}>
       <div className="sidebar-title">{all ? 'All spaces' : <>{space?.icon} {space?.name}</>}</div>
 
       <button className="nav-item search" onClick={() => store.set({ palette: true })}><Search size={16} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>
@@ -47,6 +100,7 @@ export function Sidebar() {
       <button className="nav-item" onClick={openToday}><PenLine size={16} /> Today's journal</button>
       <a className={`nav-item${route.name === 'ask' ? ' on' : ''}`} href="#/ask"><MessageSquare size={16} /> Ask Inkwell</a>
       <a className={`nav-item${route.name === 'review' ? ' on' : ''}`} href="#/review"><Compass size={16} /> Review</a>
+      <a className={`nav-item${route.name === 'calendar' ? ' on' : ''}`} href="#/calendar"><CalendarDays size={16} /> Calendar</a>
       {halcyon?.connected && <a className="nav-item" href="#/?meetings=1"><CalendarPlus size={16} /> Meeting notes</a>}
 
       {favorites.length > 0 && (
@@ -58,14 +112,14 @@ export function Sidebar() {
 
       <div className="section tree">
         <SmartSection />
-        <div className="section-head">
+        {picking ? <SelectionBar /> : <div className="section-head">
           <span className="grow">Pages</span>
           {canEdit && <Menu label="New…" className="icon small" trigger={<Plus size={15} />} items={[
             { label: 'New page', icon: FilePlus2, onClick: () => newPage() },
             { label: 'New journal (handwriting)', icon: PenLine, onClick: () => newPage({ kind: 'journal' }) },
             { label: 'From template', icon: Copy, submenu: [['meeting', 'Meeting notes'], ['daily', 'Daily plan'], ['project', 'Project brief'], ['oneOnOne', '1:1'], ['lecture', 'Lecture notes']].map(([t, label]) => ({ label, onClick: () => newPage({ template: t }) })) },
           ]} />}
-        </div>
+        </div>}
         {(all ? spaces : space ? [space] : []).map((sp) => <SpaceTree key={sp.id} space={sp} header={all} activeId={activeId} notes={trees[sp.id]} />)}
       </div>
 
@@ -126,16 +180,17 @@ function SmartSection() {
   );
 }
 
-let dragId = null;
+let dragIds = null; // pages being dragged: the whole selection when the dragged page is part of it
 
 function TreeNode({ note, childrenMap, depth, activeId, canEdit }) {
   const kids = childrenMap.get(note.id) || [];
+  const selected = useStore((s) => s.selected.includes(note.id));
   const [open, setOpen] = useState(expandedSet.has(note.id));
   const [drop, setDrop] = useState(null); // 'before' | 'inside' | 'after'
   const toggle = (e) => { e.preventDefault(); e.stopPropagation(); const o = !open; setOpen(o); if (o) expandedSet.add(note.id); else expandedSet.delete(note.id); saveExpanded(); };
 
   const onDragOver = (e) => {
-    if (!canEdit || !dragId || dragId === note.id) return;
+    if (!canEdit || !dragIds || dragIds.includes(note.id)) return;
     e.preventDefault();
     const r = e.currentTarget.getBoundingClientRect();
     const y = (e.clientY - r.top) / r.height;
@@ -145,21 +200,21 @@ function TreeNode({ note, childrenMap, depth, activeId, canEdit }) {
     e.preventDefault();
     const where = drop;
     setDrop(null);
-    const id = dragId;
-    dragId = null;
-    if (!id || id === note.id) return;
+    const ids = dragIds;
+    dragIds = null;
+    if (!ids?.length || ids.includes(note.id)) return;
+    if (ancestorsOf(note.id).some((a) => ids.includes(a))) { toast('A page cannot go inside its own sub-page', { kind: 'error' }); return; }
     try {
-      // Dropped on a page of another space: the page moves there.
+      // Dropped on a page of another space: the pages move there.
       const space = store.get().spaces.find((s) => s.id === note.spaceId);
-      const from = Object.entries(store.get().trees).find(([, t]) => t.some((n) => n.id === id))?.[0];
-      const place = (fields) => (from && from !== note.spaceId ? moveToSpace(id, space, fields) : patch(`/api/notes/${id}`, fields));
-      if (where === 'inside') { await place({ parentId: note.id }); expandedSet.add(note.id); saveExpanded(); setOpen(true); }
+      if (where === 'inside') { await movePages(ids, space, { parentId: note.id }); expandedSet.add(note.id); saveExpanded(); setOpen(true); }
       else {
-        const siblings = childrenMap.get(note.parentId || 'root') || [];
+        const siblings = (childrenMap.get(note.parentId || 'root') || []).filter((s) => s.id === note.id || !ids.includes(s.id));
         const i = siblings.findIndex((s) => s.id === note.id);
-        const afterId = where === 'after' ? note.id : (siblings[i - 1]?.id === id ? siblings[i - 2]?.id : siblings[i - 1]?.id) ?? null;
-        await place({ parentId: note.parentId, afterId });
+        const afterId = where === 'after' ? note.id : siblings[i - 1]?.id ?? null;
+        await movePages(ids, space, { parentId: note.parentId, afterId });
       }
+      if (ids.length > 1) setSelected([]);
     } catch (err) { toastError(err); }
   };
 
@@ -168,13 +223,20 @@ function TreeNode({ note, childrenMap, depth, activeId, canEdit }) {
     { label: 'Add sub-journal (handwriting)', icon: PenLine, onClick: () => newPage({ parentId: note.id, kind: 'journal' }) },
     { label: 'Duplicate', icon: Copy, onClick: async () => openNote((await post(`/api/notes/${note.id}/duplicate`)).id) },
     { label: 'Move to space…', icon: FolderInput, hidden: !canEdit, submenu: store.get().spaces.filter((s) => s.id !== note.spaceId && ['owner', 'editor'].includes(s.role)).map((s) => ({ label: `${s.icon} ${s.name}`, onClick: () => moveToSpace(note.id, s).catch(toastError) })) },
-    { label: 'Move to trash', icon: Trash2, danger: true, onClick: async () => { await del(`/api/notes/${note.id}`); forgetDoc(note.id); toast('Moved to the trash', { action: { label: 'Undo', onClick: () => post(`/api/notes/${note.id}/restore`) } }); if (activeId === note.id) navigate('#/'); } },
+    { label: 'Select', icon: CheckCheck, onClick: () => setSelected([...new Set([...store.get().selected, note.id])]) },
+    { label: 'Move to trash', icon: Trash2, danger: true, onClick: async () => { await trashPages([note.id]); if (activeId === note.id || ancestorsOf(activeId).includes(note.id)) navigate('#/'); } },
   ];
   return (
     <div className="tree-node">
-      <a href={`#/n/${note.id}`} className={`tree-row${activeId === note.id ? ' on' : ''}${drop ? ` drop-${drop}` : ''}`} style={{ paddingLeft: 6 + depth * 14 }}
-        draggable={canEdit} onDragStart={(e) => { dragId = note.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', note.title || ''); }}
-        onDragOver={onDragOver} onDragLeave={() => setDrop(null)} onDrop={onDrop} onDragEnd={() => { dragId = null; setDrop(null); }}>
+      <a href={`#/n/${note.id}`} data-id={note.id} aria-selected={selected || undefined} className={`tree-row${activeId === note.id ? ' on' : ''}${selected ? ' picked' : ''}${drop ? ` drop-${drop}` : ''}`} style={{ paddingLeft: 6 + depth * 14 }}
+        onClick={(e) => clickSelect(e, note.id)}
+        draggable={canEdit} onDragStart={(e) => {
+          const sel = store.get().selected;
+          dragIds = sel.includes(note.id) ? sel : [note.id];
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', dragIds.length > 1 ? `${dragIds.length} pages` : note.title || '');
+        }}
+        onDragOver={onDragOver} onDragLeave={() => setDrop(null)} onDrop={onDrop} onDragEnd={() => { dragIds = null; setDrop(null); }}>
         <span className={`twisty${kids.length ? '' : ' leaf'}`} onClick={toggle}>{kids.length ? (open ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : null}</span>
         <span className="ticon">{note.icon || (note.kind === 'journal' ? '✍️' : '📄')}</span>
         <span className="grow ttl">{note.title || 'Untitled'}</span>

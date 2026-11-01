@@ -2,9 +2,6 @@
 // compacted snapshot per doc plus later updates (`snapshots`, `updates`); older ones only `updates`, with no doc id for
 // the root doc. The root doc lists the pages; each page doc holds its blocks in a flat map. Here both become the same
 // shape as a Snapshot export, so one importer handles them.
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import * as Y from 'yjs';
 import { fail } from '../util/http.js';
 
@@ -14,7 +11,7 @@ export const isSqlite = (d) => Buffer.from(d.subarray(0, 15)).toString('latin1')
 
 // Old exports do not record a file's type.
 function sniff(d) {
-  const b = Buffer.from(d.subarray(0, 12));
+  const b = Buffer.from(d?.subarray(0, 12) ?? []);
   if (b[0] === 0x89 && b[1] === 0x50) return 'image/png';
   if (b[0] === 0xff && b[1] === 0xd8) return 'image/jpeg';
   if (b.toString('latin1', 0, 3) === 'GIF') return 'image/gif';
@@ -52,32 +49,30 @@ function treeOf(blocks, id, seen = new Set()) {
   return { id, flavour: b.get('sys:flavour'), props: propsOf(b), children: (kids instanceof Y.Array ? kids.toArray() : []).map((c) => treeOf(blocks, c, seen)).filter(Boolean) };
 }
 
-function readTables(file) {
-  return import('node:sqlite').then(({ DatabaseSync }) => {
-    const db = new DatabaseSync(file);
-    try {
-      const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((t) => t.name));
-      if (!tables.has('updates') && !tables.has('snapshots')) fail(400, 'This database is not an AFFiNE workspace export');
-      const rows = (sql) => db.prepare(sql).all();
-      const docs = [...(tables.has('snapshots') ? rows('SELECT doc_id, data FROM snapshots') : []),
-        ...(tables.has('updates') ? rows(`SELECT doc_id, data FROM updates ORDER BY ${[...db.prepare('PRAGMA table_info(updates)').all()].some((c) => c.name === 'id') ? 'id' : 'created_at'}`) : [])];
-      const cols = tables.has('blobs') ? db.prepare('PRAGMA table_info(blobs)').all().map((c) => c.name) : [];
-      const blobs = !cols.length ? [] : rows(`SELECT key, data${cols.includes('mime') ? ', mime' : ''} FROM blobs${cols.includes('deleted_at') ? ' WHERE deleted_at IS NULL' : ''}`);
-      return { docs, blobs };
-    } finally { db.close(); }
-  });
+// Files are read one at a time when used, so a workspace with gigabytes of attachments never sits in memory.
+async function readTables(file) {
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((t) => t.name));
+    if (!tables.has('updates') && !tables.has('snapshots')) fail(400, 'This database is not an AFFiNE workspace export');
+    const rows = (sql) => db.prepare(sql).all();
+    const docs = [...(tables.has('snapshots') ? rows('SELECT doc_id, data FROM snapshots') : []),
+      ...(tables.has('updates') ? rows(`SELECT doc_id, data FROM updates ORDER BY ${[...db.prepare('PRAGMA table_info(updates)').all()].some((c) => c.name === 'id') ? 'id' : 'created_at'}`) : [])];
+    const cols = tables.has('blobs') ? db.prepare('PRAGMA table_info(blobs)').all().map((c) => c.name) : [];
+    const blobs = !cols.length ? [] : rows(`SELECT key, substr(data, 1, 12) AS head, length(data) AS size${cols.includes('mime') ? ', mime' : ''} FROM blobs${cols.includes('deleted_at') ? ' WHERE deleted_at IS NULL' : ''}`);
+    const one = cols.length ? db.prepare('SELECT data FROM blobs WHERE key = ?') : null;
+    return { docs, blobs, blob: (key) => Buffer.from(one.get(key).data), close: () => db.close() };
+  } catch (e) { db.close(); throw e; }
 }
 
-/** { snaps: Snapshot-shaped docs, assets: Map blob key → { name, data }, trashed } */
-export async function readAffineFile(data, warnings) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inkwell-affine-'));
-  let tables;
-  try {
-    const file = path.join(dir, 'workspace.affine');
-    fs.writeFileSync(file, data);
-    tables = await readTables(file).catch((e) => { if (e.statusCode) throw e; return fail(400, `Cannot read this .affine file: ${e.message}`); });
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+/** { snaps: Snapshot-shaped docs, assets: Map blob key → { name, size, data }, close } — `file` is a path on disk. */
+export async function readAffineFile(file, warnings) {
+  const tables = await readTables(file).catch((e) => { if (e.statusCode) throw e; return fail(400, `Cannot read this .affine file: ${e.message}`); });
+  try { return { ...parse(tables, warnings), close: tables.close }; } catch (e) { tables.close(); throw e; }
+}
 
+function parse(tables, warnings) {
   const docs = new Map();
   for (const { doc_id: id, data: bin } of tables.docs) {
     const key = id ?? '';
@@ -103,8 +98,8 @@ export async function readAffineFile(data, warnings) {
   if (trashed) warnings.push(`${trashed} page(s) in AFFiNE's trash were left out`);
 
   const assets = new Map(tables.blobs.map((b) => {
-    const ext = EXT[b.mime] || EXT[sniff(b.data)];
-    return [b.key, { name: ext ? `${b.key}.${ext}` : b.key, data: b.data }];
+    const ext = EXT[b.mime] || EXT[sniff(b.head)];
+    return [b.key, { name: ext ? `${b.key}.${ext}` : b.key, size: b.size, get data() { return tables.blob(b.key); } }];
   }));
   return { snaps, assets };
 }

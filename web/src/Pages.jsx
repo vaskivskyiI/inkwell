@@ -257,17 +257,37 @@ export function SearchPage({ q }) {
 
 export function TrashPage() {
   const [items, setItems] = useState(null);
-  const load = () => get('/api/trash').then(setItems).catch(toastError);
+  const [picked, setPicked] = useState([]);
+  const load = () => get('/api/trash').then((r) => { setItems(r); setPicked((p) => p.filter((id) => r.some((n) => n.id === id))); }).catch(toastError);
   useEffect(() => { load(); }, []);
+  const toggle = (id) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const restore = async (ids) => { for (const id of ids) await post(`/api/notes/${id}/restore`); toast(ids.length > 1 ? `${ids.length} pages restored` : 'Restored'); };
+  const purge = async (ids) => {
+    if (!window.confirm(ids.length > 1 ? `Delete these ${ids.length} pages and their sub-pages forever?` : 'Delete this page and its sub-pages forever?')) return;
+    for (const id of ids) await del(`/api/notes/${id}?permanent=1`);
+  };
+  const act = (fn, ids) => fn(ids).catch(toastError).finally(load);
   return (
     <div className="page-col">
       <h1>Trash</h1>
       <p className="muted">Pages stay here for 30 days.</p>
+      {items?.length > 0 && (
+        <div className="trash-row trash-head">
+          <input type="checkbox" aria-label="Select all" checked={picked.length === items.length} ref={(el) => { if (el) el.indeterminate = picked.length > 0 && picked.length < items.length; }}
+            onChange={() => setPicked(picked.length === items.length ? [] : items.map((n) => n.id))} />
+          <span className="grow muted small">{picked.length ? `${picked.length} selected` : 'Select pages to restore or delete several at once'}</span>
+          {picked.length > 0 && <>
+            <button onClick={() => act(restore, picked)}><RotateCcw size={14} /> Restore</button>
+            <button className="danger" onClick={() => act(purge, picked)}><Trash2 size={14} /> Delete forever</button>
+          </>}
+        </div>
+      )}
       {items === null ? <span className="spinner" /> : !items.length ? <p className="muted">The trash is empty.</p> : items.map((n) => (
         <div key={n.id} className="trash-row">
+          <input type="checkbox" aria-label={`Select ${n.title || 'Untitled'}`} checked={picked.includes(n.id)} onChange={() => toggle(n.id)} />
           <span>{n.icon || '📄'}</span><span className="grow">{n.title || 'Untitled'}<span className="muted small"> · deleted {new Date(n.deletedAt).toLocaleString()}</span></span>
-          <button onClick={() => post(`/api/notes/${n.id}/restore`).then(() => { toast('Restored'); load(); }).catch(toastError)}><RotateCcw size={14} /> Restore</button>
-          <button className="danger" onClick={() => { if (window.confirm('Delete this page and its sub-pages forever?')) del(`/api/notes/${n.id}?permanent=1`).then(load).catch(toastError); }}><Trash2 size={14} /> Delete forever</button>
+          <button onClick={() => act(restore, [n.id])}><RotateCcw size={14} /> Restore</button>
+          <button className="danger" onClick={() => act(purge, [n.id])}><Trash2 size={14} /> Delete forever</button>
         </div>
       ))}
     </div>

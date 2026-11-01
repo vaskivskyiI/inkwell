@@ -9,6 +9,7 @@ let state = {
   spaceId: localGet('spaceId'),
   trees: {},           // spaceId → notes[]
   favorites: [],
+  selected: [],        // pages picked in the sidebar for a move or the trash
   settings: null,
   route: parseHash(),
   panel: localGet('panel') || '',  // '' | 'ai' | 'links' | 'ask' | 'history'
@@ -19,7 +20,8 @@ let state = {
   halcyon: null,
   commentQuote: '',    // passage a new comment is about
   pickedImage: null,   // picture selected on a canvas
-  penLayer: false,     // handwriting on top of the open typed page
+  penLayer: false,
+  mdSource: null,      // id of the page being edited as Markdown text     // handwriting on top of the open typed page
   inkText: {},         // noteId → canvasId → { text, data } (handwriting read by AI)
   inkTool: JSON.parse(localGet('inkTool') || 'null') || { tool: 'pen', color: '#1f2937', width: 3 },
 };

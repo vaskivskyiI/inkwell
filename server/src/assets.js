@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { pipeline } from 'node:stream/promises';
 import { one, many, q, now } from './db/index.js';
 import { config } from './config.js';
 import { fail, str, isUuid, uuidOr404 } from './util/http.js';
@@ -22,19 +23,48 @@ const INLINE = /^(image\/(png|jpeg|gif|webp|avif)|video\/(mp4|webm)|audio\/(mpeg
 const log = logger('assets');
 const fileOf = (sha) => path.join(config.assetsDir, sha.slice(0, 2), sha);
 
-export async function storeAsset({ spaceId, noteId, userId, name, mime, data }) {
-  const sha = crypto.createHash('sha256').update(data).digest('hex');
+/** Writes a stream to a temporary file next to the stored files, hashing on the way: uploads of any size never sit in memory. */
+export async function saveStream(stream) {
+  const dir = path.join(config.assetsDir, 'tmp');
+  await fsp.mkdir(dir, { recursive: true });
+  const file = path.join(dir, crypto.randomUUID());
+  const hash = crypto.createHash('sha256');
+  let size = 0;
+  stream.on('data', (c) => { hash.update(c); size += c.length; });
+  try { await pipeline(stream, fs.createWriteStream(file)); } catch (e) { await fsp.unlink(file).catch(() => {}); throw e; }
+  return { file, sha: hash.digest('hex'), size };
+}
+
+export const tempFile = async () => {
+  const dir = path.join(config.assetsDir, 'tmp');
+  await fsp.mkdir(dir, { recursive: true });
+  return path.join(dir, crypto.randomUUID());
+};
+
+async function hashFile(file) {
+  const hash = crypto.createHash('sha256');
+  await pipeline(fs.createReadStream(file), hash);
+  return hash.digest('hex');
+}
+
+/** Stores bytes (`data`) or a temporary file (`file`, moved into place, so the caller must not use it again). */
+export async function storeAsset({ spaceId, noteId, userId, name, mime, data, file: tmp, sha: known }) {
+  const sha = known || (tmp ? await hashFile(tmp) : crypto.createHash('sha256').update(data).digest('hex'));
+  const size = tmp ? (await fsp.stat(tmp)).size : data.length;
   const file = fileOf(sha);
   if (!fs.existsSync(file)) {
     await fsp.mkdir(path.dirname(file), { recursive: true });
-    await fsp.writeFile(`${file}.tmp`, data);
-    await fsp.rename(`${file}.tmp`, file);
-  }
+    if (tmp) await fsp.rename(tmp, file);
+    else {
+      await fsp.writeFile(`${file}.tmp`, data);
+      await fsp.rename(`${file}.tmp`, file);
+    }
+  } else if (tmp) await fsp.unlink(tmp).catch(() => {});
   const same = await one('SELECT * FROM assets WHERE space_id = $1 AND sha256 = $2 ORDER BY created_at LIMIT 1', spaceId, sha);
   if (same) return { ...same, name: str(name, 200) || same.name };
   const a = await one('INSERT INTO assets (space_id, note_id, user_id, name, mime, size, sha256, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
-    spaceId, noteId || null, userId, str(name, 200), str(mime, 100).split(';')[0] || 'application/octet-stream', data.length, sha, now());
-  if (/^image\/(png|jpeg|gif|webp)$/.test(a.mime) && data.length < 15e6) await enqueue(userId, 'image', a.id, { delay: 2, priority: 6 });
+    spaceId, noteId || null, userId, str(name, 200), str(mime, 100).split(';')[0] || 'application/octet-stream', size, sha, now());
+  if (/^image\/(png|jpeg|gif|webp)$/.test(a.mime) && size < 15e6) await enqueue(userId, 'image', a.id, { delay: 2, priority: 6 });
   if (/^audio\//.test(a.mime)) await enqueue(userId, 'transcribe', a.id, { delay: 1, priority: 3 });
   return a;
 }
@@ -66,9 +96,9 @@ export default async function assetRoutes(app) {
     const noteId = isUuid(fields.noteId) ? fields.noteId : null;
     if (noteId) spaceId = (await needNote(req.user.id, noteId, 'editor')).space_id;
     else await needSpace(req.user.id, spaceId, 'editor');
-    const data = await part.toBuffer();
-    if (part.file.truncated) fail(413, `Files can be at most ${Math.round(config.maxUpload / 1048576)} MB`);
-    const a = await storeAsset({ spaceId, noteId, userId: req.user.id, name: part.filename, mime: part.mimetype, data });
+    const saved = await saveStream(part.file);
+    if (part.file.truncated) { await fsp.unlink(saved.file).catch(() => {}); fail(413, `Files can be at most ${Math.round(config.maxUpload / 1048576)} MB`); }
+    const a = await storeAsset({ spaceId, noteId, userId: req.user.id, name: part.filename, mime: part.mimetype, file: saved.file, sha: saved.sha });
     return { id: a.id, url: `/api/assets/${a.id}`, name: a.name, mime: a.mime, size: a.size };
   });
 

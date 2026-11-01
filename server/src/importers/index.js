@@ -3,23 +3,27 @@
 //  • AFFiNE "Snapshot" export (`<collection>.bs.zip`): one `<title>-<id>.snapshot.json` per doc (a BlockSuite block tree)
 //    plus `assets/<blobId>.<ext>`. Keeps headings, nested lists, to-dos, code, tables, callouts, quotes, images,
 //    attachments, links between docs (as page mentions and as sub-pages) and edgeless pen strokes (as an ink block).
+//  • OneNote: .one, .onepkg, or a zipped notebook folder; see onenote.js.
 //  • Markdown: single .md files or zips of them (AFFiNE Markdown export, Notion, Obsidian…); folders become parent
 //    pages, relative images become assets, links to other .md files become page mentions.
 // Pages are created first (so links can point at them), then filled; each fill goes through persist(), so search
 // and background AI pick the imported pages up like typed ones.
+import fs from 'node:fs';
 import path from 'node:path';
 import * as Y from 'yjs';
-import { unzipSync, strFromU8 } from 'fflate';
+import { strFromU8 } from 'fflate';
 import { q } from '../db/index.js';
 import { fail } from '../util/http.js';
 import { createNote } from '../notes.js';
-import { storeAsset } from '../assets.js';
+import { storeAsset, saveStream, tempFile } from '../assets.js';
+import { openZip, isZipFile } from '../util/zip.js';
 import { persist } from '../collab.js';
 import { buildDoc, markdownToBlocks, encode } from '../docmodel.js';
 import { CANVAS_WIDTH } from '../ink/geometry.js';
 import { publish } from '../events.js';
 import { logger } from '../util/log.js';
 import { isSqlite, readAffineFile } from './affine-file.js';
+import { isOneNote, importOneNote } from './onenote.js';
 
 const log = logger('import');
 const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', avif: 'image/avif',
@@ -27,19 +31,35 @@ const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'im
 const mimeOf = (name) => MIME[path.extname(name).slice(1).toLowerCase()] || 'application/octet-stream';
 const sid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
-function readArchive(filename, data) {
-  if (/\.zip$/i.test(filename) || (data[0] === 0x50 && data[1] === 0x4b)) {
-    let entries;
-    try { entries = unzipSync(new Uint8Array(data)); } catch (e) { fail(400, `Cannot read the zip file: ${e.message}`); }
-    return Object.entries(entries)
-      .filter(([name, d]) => d.length && !/(^|\/)(__MACOSX|\.DS_Store)/.test(name) && !name.endsWith('/'))
-      .map(([name, d]) => ({ name: name.replace(/\\/g, '/'), data: d }));
-  }
-  return [{ name: filename, data: new Uint8Array(data) }];
+// Entries are read only when used: { name, size, data (a getter), extract(dest) }.
+const lazy = (e) => ({ name: e.name.replace(/\\/g, '/'), size: e.size, get data() { return e.read(); }, extract: e.extract });
+const fromFile = (name, file) => ({ name, size: fs.statSync(file).size, get data() { return fs.readFileSync(file); },
+  extract: (dest) => fs.promises.copyFile(file, dest) });
+
+function readHead(file, n) {
+  const fd = fs.openSync(file, 'r');
+  try { const b = Buffer.alloc(n); return b.subarray(0, fs.readSync(fd, b, 0, n, 0)); } finally { fs.closeSync(fd); }
 }
 
-/** Entry point: returns { pages, assets, rootId, format, notes: [...warnings] }. */
-export async function importArchive(userId, { spaceId, parentId = null, filename = 'import', data }) {
+/** Entry point: `file` (a path on disk, any size) or `data` (bytes). Returns { pages, assets, rootId, format, notes: [...warnings] }. */
+export async function importArchive(userId, { spaceId, parentId = null, filename = 'import', data, file }) {
+  let own = null;
+  if (!file) { own = file = await tempFile(); fs.writeFileSync(file, data); }
+  let zip = null;
+  try {
+    let files;
+    if (!isSqlite(readHead(file, 16)) && !isOneNote(filename) && (/\.zip$/i.test(filename) || isZipFile(file))) {
+      try { zip = openZip(file); } catch (e) { fail(400, `Cannot read the zip file: ${e.message}`); }
+      files = zip.entries.filter((e) => e.size && !/(^|\/)(__MACOSX|\.DS_Store)/.test(e.name)).map(lazy);
+    } else files = [fromFile(path.basename(filename), file)];
+    return await importFiles(userId, { spaceId, parentId, filename, file, files });
+  } finally {
+    zip?.close();
+    if (own) fs.promises.unlink(own).catch(() => {});
+  }
+}
+
+async function importFiles(userId, { spaceId, parentId, filename, file, files }) {
   const ctx = { userId, spaceId, stats: { pages: 0, assets: 0 }, warnings: [] };
   const finish = (format, root) => {
     publish(spaceId, 'tree:changed', {});
@@ -47,16 +67,22 @@ export async function importArchive(userId, { spaceId, parentId = null, filename
     return { format, rootId: root, pages: ctx.stats.pages, assets: ctx.stats.assets, warnings: [...new Set(ctx.warnings)].slice(0, 20) };
   };
   const newRoot = async (label) => parentId || (await createNote(userId, { spaceId, title: `${label} ${new Date().toISOString().slice(0, 10)}`, icon: '📥' })).id;
-  if (isSqlite(data)) {
-    const { snaps, assets } = await readAffineFile(data, ctx.warnings);
-    ctx.rootId = await newRoot('Imported from AFFiNE');
-    await importSnapshots(ctx, snaps, assets);
+  if (isSqlite(readHead(file, 16))) {
+    const { snaps, assets, close } = await readAffineFile(file, ctx.warnings);
+    try {
+      ctx.rootId = await newRoot('Imported from AFFiNE');
+      await importSnapshots(ctx, snaps, assets);
+    } finally { close(); }
     return finish('affine', ctx.rootId);
   }
-  const files = readArchive(filename, data);
+  if (files.some((f) => isOneNote(f.name))) {
+    ctx.rootId = await newRoot('Imported from OneNote');
+    await importOneNote(ctx, files);
+    return finish('onenote', ctx.rootId);
+  }
   const snapshots = files.filter((f) => f.name.endsWith('.snapshot.json'));
   const markdown = files.filter((f) => /\.(md|markdown)$/i.test(f.name));
-  if (!snapshots.length && !markdown.length) fail(400, 'Nothing to import — expected an AFFiNE export (.affine, or .zip with *.snapshot.json) or Markdown files');
+  if (!snapshots.length && !markdown.length) fail(400, 'Nothing to import — expected a OneNote file (.one, .onepkg), an AFFiNE export (.affine, or .zip with *.snapshot.json) or Markdown files');
   const format = snapshots.length ? 'affine' : 'markdown';
   const label = format === 'affine' ? 'Imported from AFFiNE' : `Imported ${path.basename(filename).replace(/\.(zip|md|markdown)$/i, '')}`;
   ctx.rootId = await newRoot(label);
@@ -77,10 +103,20 @@ async function fillPage(ctx, noteId, { title, blocks, ink, createdAt }) {
   if (createdAt) await q('UPDATE notes SET created_at = $2 WHERE id = $1', noteId, createdAt);
 }
 
-async function assetFor(ctx, noteId, cache, name, data) {
+// Files over this size go to disk as a stream instead of through memory.
+const STREAM_OVER = 32 * 1024 * 1024;
+
+/** `src`: bytes, or an archive entry ({ data, size, extract }). */
+export async function assetFor(ctx, noteId, cache, name, src) {
   const key = `${noteId}|${name}`;
   if (!cache.has(key)) {
-    const a = await storeAsset({ spaceId: ctx.spaceId, noteId, userId: ctx.userId, name: path.basename(name), mime: mimeOf(name), data: Buffer.from(data) });
+    let body;
+    if (src?.extract && src.size > STREAM_OVER) {
+      const file = await tempFile();
+      await src.extract(file);
+      body = { file };
+    } else body = { data: Buffer.from(src?.data ?? src) };
+    const a = await storeAsset({ spaceId: ctx.spaceId, noteId, userId: ctx.userId, name: path.basename(name), mime: mimeOf(name), ...body });
     ctx.stats.assets++;
     cache.set(key, a);
   }
@@ -170,7 +206,7 @@ async function blockOf(b, ctx) {
       const id = String(p.sourceId || '').replace(/^\//, '');
       const file = ctx.assets.get(id);
       if (!file) { ctx.warnings.push(`A ${b.flavour === 'affine:image' ? 'picture' : 'file'} was missing from the export`); return []; }
-      const a = await assetFor(ctx, ctx.noteId, ctx.assetCache, b.flavour === 'affine:attachment' && p.name ? p.name : file.name, file.data);
+      const a = await assetFor(ctx, ctx.noteId, ctx.assetCache, b.flavour === 'affine:attachment' && p.name ? p.name : file.name, file);
       if (b.flavour === 'affine:image') {
         const out = [{ type: 'image', attrs: { src: `/api/assets/${a.id}`, alt: plainOf(p.caption) || '' } }];
         if (p.caption) out.push(para([{ type: 'text', text: plainOf(p.caption), marks: [{ type: 'italic' }] }]));
@@ -359,7 +395,7 @@ async function importMarkdown(ctx, mdFiles, files) {
       if (/^(https?:|data:)/i.test(m[2])) continue;
       const file = byPath.get(resolve(m[2]));
       if (!file) { ctx.warnings.push(`Image not found in the archive: ${m[2]}`); continue; }
-      const a = await assetFor(ctx, page.noteId, assetCache, file.name, file.data);
+      const a = await assetFor(ctx, page.noteId, assetCache, file.name, file);
       md = md.replace(m[0], `![${m[1]}](/api/assets/${a.id})`);
     }
     const blocks = markdownToBlocks(md);
@@ -401,15 +437,17 @@ export default async function importRoutes(app) {
     if (!part) fail(400, 'No file');
     const fields = Object.fromEntries(Object.entries(part.fields).map(([k, v]) => [k, v?.value]));
     await needSpace(req.user.id, fields.spaceId, 'editor');
-    const data = await part.toBuffer();
-    if (part.file.truncated) fail(413, `Imports can be at most ${Math.round(config.maxImport / 1048576)} MB`);
-    let parentId = null;
-    if (isUuid(fields.parentId)) {
-      const { needNote } = await import('../spaces.js');
-      const n = await needNote(req.user.id, fields.parentId, 'editor');
-      if (n.space_id !== fields.spaceId) fail(400, 'The parent page is in another space');
-      parentId = n.id;
-    }
-    return importArchive(req.user.id, { spaceId: fields.spaceId, parentId, filename: part.filename || 'import', data });
+    const { file } = await saveStream(part.file);
+    try {
+      if (part.file.truncated) fail(413, `Imports can be at most ${Math.round(config.maxImport / 1048576)} MB`);
+      let parentId = null;
+      if (isUuid(fields.parentId)) {
+        const { needNote } = await import('../spaces.js');
+        const n = await needNote(req.user.id, fields.parentId, 'editor');
+        if (n.space_id !== fields.spaceId) fail(400, 'The parent page is in another space');
+        parentId = n.id;
+      }
+      return await importArchive(req.user.id, { spaceId: fields.spaceId, parentId, filename: part.filename || 'import', file });
+    } finally { fs.promises.unlink(file).catch(() => {}); }
   });
 }

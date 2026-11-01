@@ -248,6 +248,18 @@ const MIGRATIONS = [
   `
   ALTER TABLE users ADD COLUMN halcyon_sub text UNIQUE;
   `,
+  // 6 — when pages were worked on, per half hour and person (the calendar of notes); earlier work from versions
+  `
+  CREATE TABLE note_edits (
+    note_id uuid NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    slot bigint NOT NULL,
+    user_id uuid REFERENCES users(id) ON DELETE SET NULL
+  );
+  CREATE UNIQUE INDEX note_edits_key ON note_edits(note_id, slot, coalesce(user_id, '00000000-0000-0000-0000-000000000000'::uuid));
+  CREATE INDEX note_edits_slot ON note_edits(slot);
+  INSERT INTO note_edits (note_id, slot, user_id) SELECT note_id, created_at - created_at % 1800000, created_by FROM note_versions ON CONFLICT DO NOTHING;
+  INSERT INTO note_edits (note_id, slot, user_id) SELECT id, updated_at - updated_at % 1800000, updated_by FROM notes WHERE updated_at > created_at + 60000 ON CONFLICT DO NOTHING;
+  `,
 ];
 
 export async function migrate(db) {

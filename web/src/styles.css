@@ -88,6 +88,8 @@ code.select { user-select: all; word-break: break-all; }
 .twisty.leaf { visibility: hidden; }
 .row-actions { display: none; gap: 0; }
 .tree-row:hover .row-actions, .row-actions:focus-within { display: inline-flex; }
+.tree-row.picked { background: var(--accent-soft); color: var(--fg); box-shadow: inset 3px 0 0 var(--accent); }
+.select-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 2px; margin: 0 2px 5px; height: 22px; box-sizing: content-box; padding: 0 2px 0 8px; background: var(--bg-raised); border: 1px solid var(--accent); border-radius: 8px; font-size: 13px; }
 .tree-row.drop-inside { background: var(--accent-soft); outline: 1px dashed var(--accent); }
 .tree-row.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .tree-row.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
@@ -516,3 +518,41 @@ table.members td:first-child { display: flex; align-items: center; gap: 8px; }
 .side-head { display: flex; align-items: center; gap: 4px; height: 34px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
 .side-drag { position: absolute; top: 0; bottom: 0; left: -3px; width: 6px; cursor: col-resize; z-index: 2; }
 @media (max-width: 900px) { .side-pane { display: none; } }
+
+/* ---------- a page edited as Markdown */
+.md-source { margin-top: 8px; }
+.md-source-bar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 0; background: var(--bg); border-bottom: 1px solid var(--border); }
+.md-source-bar code { font-size: 11px; }
+.md-source-body { display: grid; gap: 16px; padding-top: 10px; }
+.md-source-body.split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.md-source textarea { width: 100%; min-height: 320px; resize: vertical; font: 13.5px/1.6 var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-soft); color: var(--fg); tab-size: 2; }
+.md-preview { border-left: 1px solid var(--border); padding-left: 16px; overflow-wrap: anywhere; }
+.page-col:has(.md-source-body.split) { max-width: min(1400px, 100%); }
+@media (max-width: 900px) { .md-source-body.split { grid-template-columns: 1fr; } .md-preview { border-left: 0; padding-left: 0; border-top: 1px solid var(--border); padding-top: 10px; } }
+
+/* ---------- calendar of notes */
+.calendar-page { max-width: 900px; }
+.cal-head, .cal-day-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cal-head { margin-top: 18px; }
+.cal-head h1 { margin: 0; font-size: 28px; }
+.cal-day-head { margin-top: 22px; }
+.cal-day-head h2 { margin: 0; font-size: 18px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-top: 14px; }
+.cal-wd { font-size: 12px; color: var(--muted); text-align: center; padding-bottom: 2px; }
+.cal-day { position: relative; min-height: 64px; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); overflow: hidden; }
+.cal-day:hover { background: var(--bg-hover); }
+.cal-day.out { color: var(--muted); background: transparent; }
+.cal-day.today .n { background: var(--accent); color: #fff; border-radius: 10px; padding: 0 6px; }
+.cal-day.sel { outline: 2px solid var(--accent); outline-offset: -1px; }
+.cal-day .n { font-size: 13px; font-weight: 600; position: relative; z-index: 1; }
+.cal-marks { display: flex; gap: 6px; font-size: 12px; position: relative; z-index: 1; }
+.cal-heat { position: absolute; inset: auto 0 0 0; height: 4px; background: var(--accent); }
+.cal-marks .c, .cal-legend .c { color: var(--accent); font-weight: 600; }
+.cal-marks .e, .cal-legend .e { color: var(--fg-soft); }
+.cal-legend { margin-top: 6px; }
+.cal-sec { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin: 16px 0 4px; }
+.cal-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; color: var(--fg); }
+.cal-row:hover { background: var(--bg-hover); }
+.cal-row .ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+label.check { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 600px) { .cal-head { margin-top: 34px; } .cal-head h1 { font-size: 22px; } .cal-day { min-height: 46px; padding: 4px; } .cal-marks { flex-direction: column; gap: 0; font-size: 11px; } }

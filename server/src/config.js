@@ -33,8 +33,9 @@ export const config = {
   workers: num(env.INKWELL_WORKERS, 2),
   // Seconds of quiet after an edit before background AI re-analyses a page.
   aiDelay: num(env.INKWELL_AI_DELAY, 45),
-  maxUpload: num(env.INKWELL_MAX_UPLOAD_MB, 50) * 1024 * 1024,
-  maxImport: num(env.INKWELL_MAX_IMPORT_MB, 500) * 1024 * 1024,
+  // Upload and import limits in MB; 0 (the default) = no limit. Files stream to disk, so size costs no memory.
+  maxUpload: num(env.INKWELL_MAX_UPLOAD_MB, 0) * 1024 * 1024 || Infinity,
+  maxImport: num(env.INKWELL_MAX_IMPORT_MB, 0) * 1024 * 1024 || Infinity,
   // Days a file stays after the last page stopped using it (undo, offline devices, recent version restores).
   assetGraceDays: num(env.INKWELL_ASSET_GRACE_DAYS, 7),
   demo: bool(env.INKWELL_DEMO),
