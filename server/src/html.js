@@ -81,5 +81,5 @@ blockquote{border-left:3px solid #d0d7de;margin:0;padding-left:14px;color:#57606
 .callout{display:flex;gap:10px;background:#f6f8fa;border-radius:8px;padding:10px 14px}.tasks{list-style:none;padding-left:4px}mark{background:#fef08a}
 .mention{color:#4f46e5}figure.ink{margin:12px 0}figure.photo{position:relative}figure.photo img{width:100%;display:block}figure.photo .over{position:absolute;inset:0}figure.photo .over svg{width:100%;height:auto}@media(prefers-color-scheme:dark){body{background:#0d1117;color:#e6edf3}pre,.callout{background:#161b22}figure.ink{background:#fff;border-radius:8px}}
 </style></head><body><h1>${esc(title || 'Untitled')}</h1>
-${body}${boxes}${journal}${overlay}</body></html>`;
+${journal ? `${journal}${boxes}${body}` : `${body}${boxes}`}${overlay}</body></html>`; // a journal's typed text sits below its paper
 }

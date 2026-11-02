@@ -223,6 +223,19 @@ export default async function noteRoutes(app) {
     return { ok: true, ids };
   });
 
+  // A page someone made and left without writing anything is not kept (no trash: there is nothing to restore).
+  // Only their own, recent, not a day's journal, no sub-pages, and nothing in it on the server either.
+  app.post('/api/notes/:id/discard', async (req) => {
+    const n = await needNote(req.user.id, req.params.id, 'editor');
+    if (n.created_by !== req.user.id || now() - Number(n.created_at) > 864e5 || n.journal_date) return { deleted: false };
+    if (await one('SELECT 1 FROM notes WHERE parent_id = $1 LIMIT 1', n.id)) return { deleted: false };
+    const info = extract(await readDoc(n.id));
+    if (info.title || info.markdown.trim() || info.canvases.length || info.tags.length) return { deleted: false };
+    await q('DELETE FROM notes WHERE id = $1', n.id);
+    publish(n.space_id, 'note:removed', { ids: [n.id] });
+    return { deleted: true };
+  });
+
   app.post('/api/notes/:id/restore', async (req) => {
     const n = await needNote(req.user.id, req.params.id, 'editor', { trashed: true });
     const ids = await descendants(n.id, { includeDeleted: true });

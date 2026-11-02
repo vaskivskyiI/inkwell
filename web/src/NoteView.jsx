@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2, MoveHorizontal, MessagesSquare, FileCode2, Camera, Smartphone, Image as ImageIcon } from 'lucide-react';
+import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2, MoveHorizontal, MessagesSquare, FileCode2, Camera, Smartphone, Image as ImageIcon, Type } from 'lucide-react';
 import { toggleFullscreen, toggleCanvasFullscreen, pageCanvas } from './ui/fullscreen.js';
 import { get, post, put, patch, del } from './api.js';
 import { store, useStore, findNote, openNote, navigate, toast, toastError, localSet } from './store.js';
@@ -9,6 +9,7 @@ import { MarkdownSource } from './editor/MarkdownSource.jsx';
 import { photoTo, requestPhoto, touchDevice, useActivePage } from './capture.js';
 import { useNarrow } from './QuickActions.jsx';
 import { JournalView } from './ink/JournalView.jsx';
+import { leavePage, emptyBody, isFresh } from './fresh.js';
 import { useYText } from './ui/ytext.js';
 import { Menu } from './ui/Menu.jsx';
 import { EmojiPicker } from './ui/EmojiPicker.jsx';
@@ -46,7 +47,7 @@ export function NoteView({ id }) {
     let done = false;
     const show = () => { if (!done) { done = true; setReady(true); } };
     h.idb.whenSynced.then(() => { if (h.doc.getXmlFragment('default').length || h.doc.getMap('ink').size || h.doc.getText('title').length) show(); });
-    if (h.provider.synced) show();
+    if (h.provider.synced || isFresh(id)) show(); // a page just made here is empty: nothing to wait for
     h.provider.on('synced', show);
     const t = setTimeout(show, 2500);
     const off = onEvent((m) => {
@@ -64,7 +65,14 @@ export function NoteView({ id }) {
     });
     const onComment = (e) => { store.set({ panel: 'comments', commentQuote: e.detail?.quote || '' }); localSet('panel', 'comments'); };
     window.addEventListener('inkwell:comment', onComment);
-    return () => { clearTimeout(t); h.provider.off('synced', show); off(); meta.unobserve(onMeta); window.removeEventListener('inkwell:comment', onComment); h.release(); };
+    const onHide = () => leavePage(id, h.doc);
+    window.addEventListener('pagehide', onHide);
+    return () => {
+      clearTimeout(t); h.provider.off('synced', show); off(); meta.unobserve(onMeta); window.removeEventListener('inkwell:comment', onComment);
+      window.removeEventListener('pagehide', onHide);
+      leavePage(id, h.doc);
+      h.release();
+    };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useActivePage(id, !!detail && ['owner', 'editor'].includes(detail.role) && !detail.deletedAt);
@@ -86,7 +94,10 @@ export function NoteView({ id }) {
           <LinkedItems noteId={id} />
           {detail.deletedAt && <div className="banner">This page is in the trash. <button onClick={() => post(`/api/notes/${id}/restore`).then(loadDetail).catch(toastError)}>Restore</button></div>}
           {!ready ? <div className="note-loading"><span className="spinner" /></div>
-            : detail.kind === 'journal' ? <JournalView note={detail} doc={handle.doc} readOnly={readOnly} />
+            : detail.kind === 'journal' ? <>
+              <JournalView note={detail} doc={handle.doc} readOnly={readOnly} />
+              <TypedBelow note={detail} doc={handle.doc} provider={handle.provider} user={user} readOnly={readOnly} />
+            </>
               : mdMode && !readOnly ? <MarkdownSource noteId={id} onClose={() => store.set({ mdSource: null })} />
               : (
                 <PenLayer doc={handle.doc} on={penLayer} readOnly={readOnly}>
@@ -236,4 +247,18 @@ function PanelHost({ detail, reload, doc }) {
   const panel = useStore((s) => s.panel);
   if (!panel) return null;
   return <RightPanel panel={panel} detail={detail} reload={reload} doc={doc} />;
+}
+
+// Typed text under a journal's paper: the page's ordinary body, shown once there is some or the person asks for it.
+function TypedBelow({ note, doc, provider, user, readOnly }) {
+  const frag = doc.getXmlFragment('default');
+  const [has, setHas] = useState(() => !emptyBody(frag));
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const on = () => { if (!emptyBody(frag)) setHas(true); };
+    frag.observeDeep(on);
+    return () => frag.unobserveDeep(on);
+  }, [frag]);
+  if (!has && !open) return readOnly ? null : <button className="typed-below-add" onClick={() => setOpen(true)}><Type size={15} /> Add typed text below</button>;
+  return <div className="typed-below"><PageEditor note={note} doc={doc} provider={provider} user={user} readOnly={readOnly} drops={false} autoFocus={open && !has} /></div>;
 }

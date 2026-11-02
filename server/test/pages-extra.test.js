@@ -169,3 +169,33 @@ test('photo from another device: active page, request, drop claimed by a device 
   }, ann.user);
   assert.equal(await bob.status('POST', `/api/notes/${page.id}/drop`, { assetId: a2.id }), 404);
 });
+
+test('a new page left empty is discarded; written, titled, older, others\' or with sub-pages it stays', async () => {
+  const sid = space(ann, 'Work').id;
+  const { withDoc } = await import('../src/collab.js');
+  const { setTitle } = await import('../src/docmodel.js');
+  const discard = (c, id) => c.post(`/api/notes/${id}/discard`);
+  const exists = async (id) => (await ann.status('GET', `/api/notes/${id}`)) === 200;
+
+  const blank = await ann.post('/api/notes', { spaceId: sid, kind: 'journal' });
+  assert.equal((await discard(ann, blank.id)).deleted, true);
+  assert.equal(await exists(blank.id), false);
+  assert.equal((await ann.get('/api/trash')).some((n) => n.id === blank.id), false, 'not kept in the trash');
+
+  const inked = await ann.post('/api/notes', { spaceId: sid, kind: 'journal' });
+  const Y = await import('yjs');
+  await withDoc(inked.id, (doc) => { const a = new Y.Array(); a.push([{ id: 's1', t: 'pen', c: '#000', w: 2, p: [10, 10, 0.5, 40, 40, 0.5] }]); doc.getMap('ink').set('page', a); });
+  const typed = await ann.post('/api/notes', { spaceId: sid, markdown: 'hello' });
+  const titled = await ann.post('/api/notes', { spaceId: sid });
+  await withDoc(titled.id, (doc) => setTitle(doc, 'Plans'));
+  const parent = await ann.post('/api/notes', { spaceId: sid });
+  await ann.post('/api/notes', { spaceId: sid, parentId: parent.id, markdown: 'child' });
+  for (const n of [inked, typed, titled, parent]) assert.equal((await discard(ann, n.id)).deleted, false);
+
+  // Someone else's empty page in a shared space is not theirs to throw away.
+  const shared = space(ann, 'Private').id;
+  await ann.post(`/api/spaces/${shared}/members`, { email: 'bob@test.local', role: 'editor' });
+  const annsBlank = await ann.post('/api/notes', { spaceId: shared });
+  assert.equal((await discard(bob, annsBlank.id)).deleted, false);
+  assert.equal(await exists(annsBlank.id), true);
+});

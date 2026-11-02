@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FolderInput, X, CheckCheck, ArrowUpToLine, ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass } from 'lucide-react';
+import { FolderInput, X, CheckCheck, ArrowUpToLine, ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass, NotebookText } from 'lucide-react';
 import { get, post } from './api.js';
 import { store, useStore, openNote, navigate, toast, toastError, localGet, localSet, currentSpace, findNote } from './store.js';
 import { onEvent, moveToSpace, movePages, trashPages } from './data.js';
 import { Menu } from './ui/Menu.jsx';
+import { markFresh } from './fresh.js';
 
 const expandedSet = new Set(JSON.parse(localGet('expanded') || '[]'));
 const saveExpanded = () => localSet('expanded', JSON.stringify([...expandedSet].slice(-500)));
@@ -15,8 +16,11 @@ export async function newPage({ kind = 'page', parentId = null, template } = {})
   try {
     const n = await post('/api/notes', { spaceId: s.id, parentId, kind, template });
     if (parentId) { expandedSet.add(parentId); saveExpanded(); }
+    markFresh(n.id);
+    // A handwritten page opens with the pen in hand; a typed one with the cursor in the title.
+    if (kind === 'journal') store.set({ penStart: n.id });
     openNote(n.id);
-    setTimeout(() => document.querySelector('.title-input')?.focus(), 150);
+    if (kind !== 'journal') setTimeout(() => document.querySelector('.title-input')?.focus(), 150);
   } catch (e) { toastError(e); }
 }
 
@@ -97,7 +101,8 @@ export function Sidebar() {
 
       <button className="nav-item search" onClick={() => store.set({ palette: true })}><Search size={16} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>
       <a className={`nav-item${route.name === 'home' ? ' on' : ''}`} href="#/"><Home size={16} /> Home</a>
-      <button className="nav-item" onClick={openToday}><PenLine size={16} /> Today's journal</button>
+      {canEdit && <button className="nav-item" onClick={() => newPage({ kind: 'journal' })}><PenLine size={16} /> Write by hand</button>}
+      <button className="nav-item" onClick={openToday}><NotebookText size={16} /> Today's journal</button>
       <a className={`nav-item${route.name === 'ask' ? ' on' : ''}`} href="#/ask"><MessageSquare size={16} /> Ask Inkwell</a>
       <a className={`nav-item${route.name === 'review' ? ' on' : ''}`} href="#/review"><Compass size={16} /> Review</a>
       <a className={`nav-item${route.name === 'calendar' ? ' on' : ''}`} href="#/calendar"><CalendarDays size={16} /> Calendar</a>
@@ -114,6 +119,7 @@ export function Sidebar() {
         <SmartSection />
         {picking ? <SelectionBar /> : <div className="section-head">
           <span className="grow">Pages</span>
+          {canEdit && <button className="icon small" title="New handwritten page" aria-label="New handwritten page" onClick={() => newPage({ kind: 'journal' })}><PenLine size={15} /></button>}
           {canEdit && <Menu label="New…" className="icon small" trigger={<Plus size={15} />} items={[
             { label: 'New page', icon: FilePlus2, onClick: () => newPage() },
             { label: 'New journal (handwriting)', icon: PenLine, onClick: () => newPage({ kind: 'journal' }) },

@@ -28,8 +28,8 @@ export function HomePage() {
       <QuickNote />
       <div className="quick">
         <button onClick={() => newPage()}><FilePlus2 size={18} /> New page</button>
-        <button onClick={() => newPage({ kind: 'journal' })}><PenLine size={18} /> New journal</button>
-        <button onClick={openToday}><PenLine size={18} /> Today's journal</button>
+        <button onClick={() => newPage({ kind: 'journal' })}><PenLine size={18} /> Write by hand</button>
+        <button onClick={openToday}><NotebookText size={18} /> Today's journal</button>
         <button onClick={() => newPage({ template: 'meeting' })}><CalendarDays size={18} /> Meeting notes</button>
       </div>
       {halcyon?.connected && <Today key={spaceId} highlight={!!route.query.meetings} />}

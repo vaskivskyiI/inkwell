@@ -1,6 +1,6 @@
 // Frequent actions within one tap on phones and tablets, and the camera offered when another device asks for a photo.
 import { useEffect, useState } from 'react';
-import { Camera, X, FilePlus2, PenLine, Search, Image, Zap } from 'lucide-react';
+import { Camera, X, FilePlus2, PenLine, Search, Image, Zap, NotebookText } from 'lucide-react';
 import { post } from './api.js';
 import { store, useStore, openNote, toastError, currentSpace, findNote } from './store.js';
 import { onEvent } from './data.js';
@@ -49,8 +49,9 @@ export function QuickActions() {
     elsewhere && { icon: Camera, label: <>Photo to <b>{elsewhere.icon} {elsewhere.title || 'Untitled'}</b></>, hint: 'the page you are working on elsewhere', primary: true, run: () => pickPhoto().then((f) => sendPhoto(f, elsewhere)) },
     here && { icon: Camera, label: 'Photo into this page', primary: !elsewhere, run: () => pickPhoto().then((f) => sendPhoto(f, findNote(here) || { id: here })) },
     { icon: Image, label: 'Photo as a new page', run: () => photoAsPage(true) },
+    { icon: PenLine, label: 'Write by hand', hint: 'a new handwritten page', run: () => newPage({ kind: 'journal' }) },
     { icon: FilePlus2, label: 'New page', run: () => newPage() },
-    { icon: PenLine, label: "Today's journal", run: openToday },
+    { icon: NotebookText, label: "Today's journal", run: openToday },
     { icon: Search, label: 'Search', run: () => store.set({ palette: true }) },
   ].filter(Boolean);
   return (

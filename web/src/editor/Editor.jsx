@@ -24,7 +24,7 @@ import { useDrops } from '../capture.js';
 
 const looksLikeMarkdown = (t) => /(^|\n)(#{1,6} |[-*+] |\d+\. |```|> |\|.*\|)/.test(t);
 
-export function PageEditor({ note, doc, provider, user, readOnly }) {
+export function PageEditor({ note, doc, provider, user, readOnly, drops = true, autoFocus = false }) {
   const capture = useRef(null);
   const touched = useRef(false); // the cursor is somewhere the person put it (else photos go to the end)
   const fileInput = useRef(null);
@@ -172,7 +172,8 @@ export function PageEditor({ note, doc, provider, user, readOnly }) {
     const { $to } = e.state.selection;
     const pos = touched.current ? ($to.depth >= 1 ? $to.after(1) : $to.pos) : e.state.doc.content.size;
     e.chain().insertContentAt(pos, [{ type: 'image', attrs: { src: url, alt: name || '' } }, { type: 'paragraph' }]).run();
-  }, !readOnly);
+  }, !readOnly && drops);
+  useEffect(() => { if (autoFocus && editor && !readOnly) setTimeout(() => editor.commands.focus('end'), 30); }, [editor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Set the awareness name/colour once more (the caret extension sends it on connect).
   useEffect(() => { editor?.commands.updateUser?.({ name: user.name, color: user.color }); }, [editor, user.name, user.color]);

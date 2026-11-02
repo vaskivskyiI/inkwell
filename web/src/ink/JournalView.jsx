@@ -10,7 +10,7 @@ import { post } from '../api.js';
 import { Markdown } from '../ui/Markdown.jsx';
 import { addCanvasImage, placeCanvasImage } from './CanvasImages.jsx';
 import { useDrops } from '../capture.js';
-import { toast, toastError, useStore, openNote } from '../store.js';
+import { store, toast, toastError, useStore, openNote } from '../store.js';
 
 const PAPERS = [['ruled', 'Ruled'], ['grid', 'Grid'], ['dotted', 'Dotted'], ['plain', 'Plain']];
 
@@ -31,6 +31,15 @@ export function JournalView({ note, doc, readOnly }) {
     return () => meta.unobserve(on);
   }, [meta, height]);
 
+  // Opened with "Write by hand": the pen is in hand and keys go to the paper.
+  const root = useRef(null);
+  useEffect(() => {
+    if (readOnly || store.get().penStart !== note.id) return;
+    store.set({ penStart: null });
+    setInkTool({ tool: 'pen' });
+    root.current?.focus({ preventScroll: true });
+  }, [note.id, readOnly]);
+
   const grow = (h) => { setHeight(h); if (!readOnly) meta.set('height', h); };
 
   // A photo from another device: in the middle of what this screen shows.
@@ -50,7 +59,7 @@ export function JournalView({ note, doc, readOnly }) {
   const transcribe = () => post(`/api/notes/${note.id}/ink/page/recognize`).then(() => toast('Reading your handwriting…')).catch(toastError);
 
   return (
-    <div className="journal" onPaste={(e) => { const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith('image/')); if (f && !readOnly) { e.preventDefault(); addCanvasImage(doc, 'page', f, note.id, canvas.current?.viewCenter() || { x: 500, y: 200 }); } }} onKeyDown={(e) => { if (!readOnly && e.target.tagName !== 'TEXTAREA' && toolKey(e)) e.preventDefault(); }}>
+    <div className="journal" ref={root} tabIndex={-1} onPaste={(e) => { const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith('image/')); if (f && !readOnly) { e.preventDefault(); addCanvasImage(doc, 'page', f, note.id, canvas.current?.viewCenter() || { x: 500, y: 200 }); } }} onKeyDown={(e) => { if (!readOnly && e.target.tagName !== 'TEXTAREA' && toolKey(e)) e.preventDefault(); }}>
       {readOnly && <button className="recognized-toggle" onClick={() => setShowText(!showText)}><FileText size={15} /> Recognized text</button>}
       {!readOnly && (
         <div className="journal-tools">

@@ -593,3 +593,8 @@ label.check { display: inline-flex; align-items: center; gap: 6px; }
 .share-targets .sub { flex-basis: 100%; font-size: 12px; opacity: .8; font-weight: normal; }
 .share-new { display: flex; gap: 8px; align-items: center; }
 .share-new select { flex: 1; min-width: 0; }
+
+/* Typed text under a journal's paper */
+.journal:focus { outline: none; }
+.typed-below-add { margin-top: 14px; display: inline-flex; align-items: center; gap: 6px; }
+.typed-below { margin-top: 18px; padding: 6px 0 0 32px; border-top: 1px dashed var(--border-strong); }
