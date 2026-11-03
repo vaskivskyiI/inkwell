@@ -210,7 +210,15 @@ export default async function linkRoutes(app) {
       FROM notes n LEFT JOIN note_links l ON l.note_id = n.id AND l.kind IN ('event', 'email', 'task')
       WHERE n.space_id = ANY($1::uuid[]) AND n.deleted_at IS NULL AND (l.id IS NOT NULL OR n.kind = 'journal')
       ORDER BY n.created_at DESC LIMIT 3000`, spaces);
-    const card = (r) => ({ id: r.id, title: r.title, icon: r.icon, kind: r.kind, spaceId: r.space_id, updatedAt: r.updated_at, createdAt: r.created_at });
+    // Pages AI recognised as notes of a meeting join the meetings, under the same meeting when the name matches.
+    const linkedEvent = new Set(rows.filter((r) => r.lk === 'event').map((r) => r.id));
+    const recognised = (await many(`SELECT n.id, n.title, n.icon, n.kind, n.space_id, n.updated_at, n.created_at, i.meeting_json FROM notes n JOIN ai_insights i ON i.note_id = n.id
+      WHERE n.space_id = ANY($1::uuid[]) AND n.deleted_at IS NULL AND i.meeting_json->>'title' IS NOT NULL ORDER BY n.created_at DESC LIMIT 1000`, spaces))
+      .filter((r) => !linkedEvent.has(r.id))
+      .map((r) => ({ ...r, lk: 'event', lt: r.meeting_json.title, meta_json: { day: r.meeting_json.date }, recognised: true }));
+    // A meeting's date: its occurrence (or the date AI read), else the day the page was made.
+    const card = (r) => ({ id: r.id, title: r.title, icon: r.icon, kind: r.kind, spaceId: r.space_id, updatedAt: r.updated_at, createdAt: r.created_at,
+      ...(r.lk === 'event' ? { date: dayOf(r.meta_json) || dateOf(r.created_at), recognised: !!r.recognised } : {}) });
     const group = (id, label, list, keyOf, min) => {
       const by = new Map();
       for (const r of list) { const k = keyOf?.(r); if (k) { if (!by.has(k.toLowerCase())) by.set(k.toLowerCase(), { label: k, rows: [] }); by.get(k.toLowerCase()).rows.push(r); } }
@@ -221,13 +229,27 @@ export default async function linkRoutes(app) {
         notes: list.filter((r) => !inSub.has(r.id)).map(card) };
     };
     const of = (k) => rows.filter((r) => r.lk === k);
+    // Tags used lately (each its own sub-category, most recently used first), pages with open check boxes, and
+    // pages someone else changed in the last two weeks.
+    const cols = 'n.id, n.title, n.icon, n.kind, n.space_id, n.updated_at, n.created_at';
+    const [tagged, todos, others] = await Promise.all([
+      many(`SELECT ${cols}, n.tags FROM notes n WHERE n.space_id = ANY($1::uuid[]) AND n.deleted_at IS NULL AND cardinality(n.tags) > 0 AND n.updated_at > $2 ORDER BY n.updated_at DESC LIMIT 1000`, spaces, Date.now() - 60 * 864e5),
+      many(`SELECT ${cols} FROM notes n WHERE n.space_id = ANY($1::uuid[]) AND n.deleted_at IS NULL AND n.text_content LIKE '%[ ]%' ORDER BY n.updated_at DESC LIMIT 200`, spaces),
+      many(`SELECT ${cols} FROM notes n WHERE n.space_id = ANY($1::uuid[]) AND n.deleted_at IS NULL AND n.updated_by IS NOT NULL AND n.updated_by <> $2 AND n.updated_at > $3 ORDER BY n.updated_at DESC LIMIT 200`, spaces, req.user.id, Date.now() - 14 * 864e5),
+    ]);
+    const recentTags = [...new Set(tagged.flatMap((r) => r.tags))].slice(0, 10);
+    const tagGroup = { id: 'tags', label: 'Recent tags', count: tagged.length, notes: [],
+      subs: recentTags.map((t) => { const notes = tagged.filter((r) => r.tags.includes(t)).map(card); return { id: t, label: `#${t}`, count: notes.length, notes }; }) };
     const person = (r) => String(r.meta_json?.from || '').replace(/<.*>/, '').trim();
     const seen = new Set();
     return [
-      group('meetings', 'Meetings', of('event'), (r) => r.lt, 2),
+      group('meetings', 'Meetings', [...of('event'), ...recognised], (r) => r.lt, 2),
       group('tasks', 'Tasks', of('task')),
       group('emails', 'E-mails', of('email'), person, 2),
       group('journals', 'Handwritten', rows.filter((r) => r.kind === 'journal' && !seen.has(r.id) && seen.add(r.id))),
+      group('todos', 'Open to-dos', todos),
+      group('others', 'Changed by others', others),
+      tagGroup,
     ].filter((g) => g.count);
   });
 

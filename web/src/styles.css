@@ -640,3 +640,4 @@ label.check { display: inline-flex; align-items: center; gap: 6px; }
 .link-to-page .link-item { display: flex; align-items: center; gap: 6px; }
 .link-to-page .results { display: grid; gap: 2px; margin-top: 10px; }
 .link-to-page .list-item { display: flex; gap: 8px; align-items: center; text-align: left; }
+.card-date { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 2px; }

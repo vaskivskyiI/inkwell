@@ -9,6 +9,7 @@ import { AskTab } from './RightPanel.jsx';
 import { highlight } from './Palette.jsx';
 
 const greeting = () => { const h = new Date().getHours(); return h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'; };
+const dayLabel = (d) => new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 const when = (t) => { const d = new Date(t); const today = new Date().toDateString() === d.toDateString(); return today ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString(); };
 
 export function HomePage() {
@@ -112,13 +113,20 @@ export function SmartPage({ cat, sub }) {
   const g = groups.find((x) => x.id === cat);
   if (!g) return <div className="page-col"><h1>Nothing here yet</h1><p className="muted">Notes appear here when they are linked to meetings, tasks or e-mails.</p></div>;
   const s = sub && g.subs.find((x) => x.id === sub);
-  const notes = s ? s.notes : [...g.subs.flatMap((x) => x.notes), ...g.notes].sort((a, b) => b.createdAt - a.createdAt);
+  // Meetings by the day they took place (recurring ones have the same title), the rest by when they were made.
+  const order = (a, b) => (b.date || '').localeCompare(a.date || '') || b.createdAt - a.createdAt;
+  const notes = (s ? [...s.notes] : [...g.subs.flatMap((x) => x.notes), ...g.notes]).sort(order);
   return (
     <div className="page-col home wide">
       <h1>{s ? s.label : g.label}</h1>
       {!s && g.subs.length > 0 && <div className="chips" style={{ marginBottom: 18 }}>{g.subs.map((x) => <a key={x.id} className="chip" href={`#/smart/${g.id}?sub=${encodeURIComponent(x.id)}`}>{x.label} · {x.count}</a>)}</div>}
       <div className="cards">
-        {notes.map((n) => <a key={n.id} className="card" href={`#/n/${n.id}`}><div className="card-title"><span>{n.icon || '📄'}</span> {n.title || 'Untitled'}</div><div className="card-snippet" /><div className="muted small">{when(n.createdAt)}</div></a>)}
+        {notes.map((n) => (
+          <a key={n.id} className="card" href={`#/n/${n.id}`}>
+            {n.date && <div className="card-date">{dayLabel(n.date)}</div>}
+            <div className="card-title"><span>{n.icon || '📄'}</span> {n.title || 'Untitled'}</div><div className="card-snippet" />
+            <div className="muted small">{n.recognised ? <span title="Not linked to a calendar event; AI recognised it as notes of this meeting">Recognised as a meeting · </span> : ''}{n.date ? `made ${when(n.createdAt)}` : when(n.createdAt)}</div>
+          </a>))}
       </div>
     </div>
   );

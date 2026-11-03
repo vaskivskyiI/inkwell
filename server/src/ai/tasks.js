@@ -34,27 +34,36 @@ registerHandler('analyze', async (job) => {
   if (!settings) return;
   const doc = await readDoc(n.id);
   const info = extract(doc, { recognitions: await recognitionsOf(n.id) });
-  const existing = await one('SELECT content_hash FROM ai_insights WHERE note_id = $1', n.id);
-  if (existing?.content_hash === info.hash) return;
-  const save = (fields) => q(`INSERT INTO ai_insights (note_id, summary, title, tags_json, actions_json, content_hash, error, updated_at)
-    VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8) ON CONFLICT (note_id) DO UPDATE SET summary = EXCLUDED.summary, title = EXCLUDED.title,
-    tags_json = EXCLUDED.tags_json, actions_json = EXCLUDED.actions_json, content_hash = EXCLUDED.content_hash, error = EXCLUDED.error, updated_at = EXCLUDED.updated_at`,
-  n.id, fields.summary || '', fields.title || '', JSON.stringify(fields.tags || []), JSON.stringify(fields.actions || []), info.hash, fields.error || null, now());
+  // meeting_json IS NULL: analysed before meetings were recognised — once more ("Re-analyse all my pages").
+  const existing = await one('SELECT content_hash, meeting_json IS NOT NULL AS asked FROM ai_insights WHERE note_id = $1', n.id);
+  if (existing?.content_hash === info.hash && existing.asked) return;
+  const save = (fields) => q(`INSERT INTO ai_insights (note_id, summary, title, tags_json, actions_json, meeting_json, content_hash, error, updated_at)
+    VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8, $9) ON CONFLICT (note_id) DO UPDATE SET summary = EXCLUDED.summary, title = EXCLUDED.title,
+    tags_json = EXCLUDED.tags_json, actions_json = EXCLUDED.actions_json, meeting_json = EXCLUDED.meeting_json, content_hash = EXCLUDED.content_hash, error = EXCLUDED.error, updated_at = EXCLUDED.updated_at`,
+  n.id, fields.summary || '', fields.title || '', JSON.stringify(fields.tags || []), JSON.stringify(fields.actions || []), JSON.stringify(fields.meeting || null), info.hash, fields.error || null, now());
   if (info.markdown.replace(/\s+/g, ' ').trim().length < 40) { await save({}); return; }
   const r = await resolve(job.user_id, 'chat', { spaceId: n.space_id });
   if (!r) return NO_PROVIDER;
   // Tags already in use in the space: the model is asked to reuse them, and what it suggests is matched to them.
   const known = (await tagList(job.user_id, n.space_id)).map((t) => t.tag);
-  const out = await askJson(r, { system: analyzePrompt(settings, known.slice(0, 150)), user: `TITLE: ${info.title || '(untitled)'}\n${info.markdown.slice(0, 24000)}` });
+  // Names of meetings with notes here, so a recognised meeting joins the notes of the same (recurring) meeting.
+  const meetings = (await many(`SELECT DISTINCT title FROM (SELECT l.title FROM note_links l JOIN notes x ON x.id = l.note_id WHERE l.kind = 'event' AND x.space_id = $1 AND l.title <> ''
+    UNION SELECT i.meeting_json->>'title' FROM ai_insights i JOIN notes x ON x.id = i.note_id WHERE x.space_id = $1 AND i.meeting_json IS NOT NULL) t WHERE title IS NOT NULL LIMIT 80`, n.space_id)).map((m) => m.title);
+  const out = await askJson(r, { system: analyzePrompt(settings, known.slice(0, 150), meetings), user: `TITLE: ${info.title || '(untitled)'}\n${info.markdown.slice(0, 24000)}` });
   const insight = {
     title: String(out.title || '').slice(0, 120),
     summary: String(out.summary || '').slice(0, 1200),
     tags: [...new Set((Array.isArray(out.tags) ? out.tags : []).map((t) => matchTag(t, known)).filter(Boolean))].slice(0, 6),
+    meeting: out.meeting?.title ? { title: matchMeeting(String(out.meeting.title).slice(0, 200), meetings), date: /^\d{4}-\d{2}-\d{2}/.test(out.meeting.date || '') ? out.meeting.date.slice(0, 10) : null } : null,
     actions: (Array.isArray(out.actions) ? out.actions : []).map((a) => ({ text: String(a?.text || a || '').slice(0, 300), due: /^\d{4}-\d{2}-\d{2}/.test(a?.due || '') ? a.due.slice(0, 10) : null })).filter((a) => a.text).slice(0, 20),
   };
   await save(insight);
   publish(n.space_id, 'ai:insight', { noteId: n.id, insight });
 });
+
+// The name of a meeting as it is already written in the notes, when only case, spacing or punctuation differ.
+const meetKey = (t) => String(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+const matchMeeting = (title, known) => known.find((k) => meetKey(k) === meetKey(title)) || title;
 
 registerHandler('analyze:failed', async (job, e, retry) => {
   if (!retry) await q(`INSERT INTO ai_insights (note_id, error, updated_at) VALUES ($1, $2, $3)

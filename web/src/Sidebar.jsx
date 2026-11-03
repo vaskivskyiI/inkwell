@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FolderInput, X, CheckCheck, ArrowUpToLine, ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass, NotebookText } from 'lucide-react';
+import { FolderInput, X, CheckCheck, ArrowUpToLine, ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass, NotebookText, ListTodo, Users, Hash } from 'lucide-react';
 import { get, post } from './api.js';
 import { store, useStore, openNote, navigate, toast, toastError, localGet, localSet, currentSpace, findNote } from './store.js';
 import { onEvent, moveToSpace, movePages, trashPages } from './data.js';
@@ -156,7 +156,7 @@ function SpaceTree({ space, header, activeId, notes }) {
 }
 
 // Smart categories: notes grouped by what they belong to; recurring meetings get their own sub-category.
-const SMART_ICON = { meetings: CalendarDays, tasks: CheckSquare, emails: Mail, journals: PenLine };
+const SMART_ICON = { meetings: CalendarDays, tasks: CheckSquare, emails: Mail, journals: PenLine, todos: ListTodo, others: Users, tags: Hash };
 function SmartSection() {
   const spaceId = useStore((s) => s.spaceId);
   const route = useStore((s) => s.route);

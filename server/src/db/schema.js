@@ -275,6 +275,10 @@ const MIGRATIONS = [
   );
   CREATE INDEX drops_created ON drops(created_at);
   `,
+  // 8: pages AI recognises as notes of a meeting (not linked to a calendar event): { title, date }
+  `
+  ALTER TABLE ai_insights ADD COLUMN meeting_json jsonb;
+  `,
 ];
 
 export async function migrate(db) {

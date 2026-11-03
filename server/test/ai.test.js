@@ -232,3 +232,31 @@ test('a title written by hand is read on the spot; PDF export cuts handwriting i
     assert.ok(!Array.from({ length: 66 }, (_, i) => 30 + i * 60).some((y) => y - 3 < y0 && y + 23 > y0), `cut at ${y0}`);
   }
 });
+
+test('pages AI recognises as meeting notes join Meetings, with the date, under the same meeting', async () => {
+  const linked = await ann.post('/api/notes', { spaceId: work(), title: 'Weekly sync', markdown: 'Short.' });
+  await ann.post(`/api/notes/${linked.id}/links`, { kind: 'event', ref: 'ev-77', title: 'Weekly sync', meta: { day: '2026-10-27' } });
+  const rec = await ann.post('/api/notes', { spaceId: work(), title: 'weekly  sync', markdown: 'Minutes of the 2026-11-03 meeting.\n\nAttendees: Ana, Bob\n\n- [ ] send the report' });
+  const plain = await ann.post('/api/notes', { spaceId: work(), title: 'Recipes', markdown: 'Bread needs flour, water, salt and some patience overnight.' });
+  for (const n of [rec, plain]) await ann.post(`/api/notes/${n.id}/ai/refresh`);
+  await drain();
+  const meetings = (await ann.get(`/api/smart?space=${work()}`)).find((g) => g.id === 'meetings');
+  const sub = meetings.subs.find((s) => s.id === 'weekly sync');
+  assert.ok(sub, JSON.stringify(meetings.subs.map((s) => s.label)));
+  const byId = Object.fromEntries(sub.notes.map((n) => [n.id, n]));
+  assert.deepEqual([byId[linked.id]?.date, byId[linked.id]?.recognised], ['2026-10-27', false]);
+  assert.deepEqual([byId[rec.id]?.date, byId[rec.id]?.recognised], ['2026-11-03', true]);
+  assert.ok(![...meetings.notes, ...meetings.subs.flatMap((s) => s.notes)].some((n) => n.id === plain.id));
+});
+
+test('smart menus: recent tags, open to-dos', async () => {
+  const n = await ann.post('/api/notes', { spaceId: work(), title: 'Shopping', markdown: '- [ ] milk\n- [x] bread' });
+  await withDoc(n.id, (d) => { const a = new Y.Array(); a.push(['groceries']); d.getMap('meta').set('tags', a); }, ann.user);
+  const { waitFor } = await import('./helpers.js');
+  await waitFor(async () => (await ann.get(`/api/notes/${n.id}`)).tags?.includes('groceries'));
+  const groups = await ann.get(`/api/smart?space=${work()}`);
+  const tags = groups.find((g) => g.id === 'tags');
+  assert.equal(tags.subs[0].id, 'groceries');
+  assert.ok(tags.subs[0].notes.some((x) => x.id === n.id));
+  assert.ok(groups.find((g) => g.id === 'todos').notes.some((x) => x.id === n.id));
+});

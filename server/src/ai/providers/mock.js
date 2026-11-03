@@ -23,7 +23,8 @@ export function mock() {
         const firstLine = body.split('\n').find((l) => l.trim() && !l.startsWith('TITLE:')) || '';
         const actions = [...body.matchAll(/^\s*- \[ \] (.+)$/gm)].map((m) => ({ text: m[1].trim(), due: null }));
         const tags = [...new Set(words(body).filter((w) => w.length > 5))].slice(0, 3);
-        text = JSON.stringify({ title: firstLine.replace(/[#*_>]/g, '').trim().slice(0, 60) || 'Untitled', summary: `Summary: ${firstLine.replace(/[#*_>]/g, '').trim().slice(0, 120)}`, tags, actions });
+        const meeting = /attendees|minutes/i.test(body) ? { title: (input.match(/^TITLE: (.+)$/m)?.[1] || 'Meeting').replace(/\s*\d{4}-\d{2}-\d{2}$/, ''), date: body.match(/\d{4}-\d{2}-\d{2}/)?.[0] || null } : null;
+        text = JSON.stringify({ title: firstLine.replace(/[#*_>]/g, '').trim().slice(0, 60) || 'Untitled', summary: `Summary: ${firstLine.replace(/[#*_>]/g, '').trim().slice(0, 120)}`, tags, actions, meeting });
       } else if (json && /LINKS/.test(system)) {
         const ids = [...input.matchAll(/^\[(\w+:[^\]]+)\]/gm)].map((m) => m[1]).slice(0, 1);
         text = JSON.stringify({ links: ids.map((ref) => ({ ref, reason: 'mock match' })) });
