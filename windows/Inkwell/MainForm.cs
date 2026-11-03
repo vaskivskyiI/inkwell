@@ -18,6 +18,7 @@ public sealed class MainForm : Form
     CoreWebView2Environment? env;
     string? scriptId;
     string startRoute;
+    string? startUrl;
     bool pageOk;
 
     string Server => config.Server;
@@ -27,6 +28,7 @@ public sealed class MainForm : Form
     {
         this.config = config;
         startRoute = RouteOf(args) ?? Home;
+        startUrl = LinkOf(args);
         Text = "Inkwell";
         Icon = Icons.App;
         MinimumSize = new Size(380, 500);
@@ -82,7 +84,7 @@ public sealed class MainForm : Form
             if (Ours(u) || u.StartsWith("about:") || u.StartsWith("data:")) { pageOk = false; return; }
             // The window only ever shows the server; everything else opens in the default browser.
             e.Cancel = true;
-            if (u.StartsWith("http:") || u.StartsWith("https:")) Shell.Open(u);
+            if (u.StartsWith("http:") || u.StartsWith("https:")) Shell.OpenLink(u);
         };
         core.NavigationCompleted += (_, e) =>
         {
@@ -96,7 +98,7 @@ public sealed class MainForm : Form
         };
         Wire(core);
         await Inject();
-        core.Navigate($"{Server}/{startRoute}");
+        core.Navigate(startUrl ?? $"{Server}/{startRoute}");
     }
 
     static string Version => Application.ProductVersion.Split('+')[0];
@@ -154,7 +156,7 @@ public sealed class MainForm : Form
             return;
         }
         e.Handled = true;
-        if (u.StartsWith("http:") || u.StartsWith("https:")) Shell.Open(u);
+        if (u.StartsWith("http:") || u.StartsWith("https:")) Shell.OpenLink(u);
     }
 
     async Task Inject()
@@ -188,9 +190,24 @@ public sealed class MainForm : Form
     /// <summary>A second start of the app (Start menu shortcut, inkwell: link) handed its arguments over.</summary>
     public void Arrive(string[] args)
     {
+        var link = Array.IndexOf(args, "--link") is var i and >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+        if (link != null && !Ours(link))
+        {
+            // Not this server's: Halcyon handed it over because it is not Halcyon's either.
+            if (link.StartsWith("http:") || link.StartsWith("https:")) Shell.Open(link);
+            return;
+        }
         Shell.Front(this);
+        if (link != null) { if (web.CoreWebView2 == null) startUrl = link; else web.CoreWebView2.Navigate(link); return; }
         var r = RouteOf(args);
         if (r != null) Go(r);
+    }
+
+    /// <summary>"--link url" from Halcyon on the first start: only a page of the server is opened here.</summary>
+    string? LinkOf(string[] args)
+    {
+        var i = Array.IndexOf(args, "--link");
+        return i >= 0 && i + 1 < args.Length && Ours(args[i + 1]) ? args[i + 1] : null;
     }
 
     /// <summary>"inkwell:#/new?do=hand", "inkwell://#/…" or "--route=#/…" → "#/new?do=hand". Only places inside the
@@ -235,6 +252,7 @@ public sealed class MainForm : Form
         if (f.ShowDialog(this) != DialogResult.OK) return;
         config.Server = f.Server;
         Save();
+        Shell.Announce(Server);
         if (web.CoreWebView2 == null) return;
         _ = Inject().ContinueWith(_ => BeginInvoke(() => web.CoreWebView2.Navigate($"{Server}/{Home}")));
     }

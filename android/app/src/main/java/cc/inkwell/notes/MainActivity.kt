@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_OPEN = "cc.inkwell.notes.OPEN"
         const val EXTRA_ROUTE = "route"
+        const val EXTRA_URL = "url" // a page of the server, handed over by LinkActivity (a link from Halcyon)
         const val HOME = "#/"
         const val SHARE_LIMIT_MB = 200
     }
@@ -112,13 +113,13 @@ class MainActivity : ComponentActivity() {
         // Back = back in the web app's history; at its start the app goes to the background (and stays signed in).
         onBackPressedDispatcher.addCallback(this) { if (web.canGoBack()) web.goBack() else moveTaskToBack(true) }
 
-        load(arrive(intent) ?: HOME)
+        urlOf(intent)?.let { web.loadUrl(it) } ?: load(arrive(intent) ?: HOME)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        arrive(intent)?.let { go(it) }
+        urlOf(intent)?.let { web.loadUrl(it) } ?: arrive(intent)?.let { go(it) }
     }
 
     override fun onPause() {
@@ -138,6 +139,9 @@ class MainActivity : ComponentActivity() {
         // Only places inside the web app: another app may start this activity too.
         return i.getStringExtra(EXTRA_ROUTE)?.takeIf { it.startsWith("#/") }
     }
+
+    /** Only the server's own pages: another app may start this activity too. */
+    private fun urlOf(i: Intent?): String? = i?.getStringExtra(EXTRA_URL)?.takeIf { ours(Uri.parse(it)) }
 
     private fun load(route: String) {
         last = route
@@ -340,6 +344,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun outside(u: Uri) {
+        // Halcyon, when installed, decides: its own server's pages open in it, the rest in the browser.
+        if (u.scheme == "http" || u.scheme == "https") try {
+            startActivity(Intent("cc.halcyon.mail.OPEN_LINK").setPackage("cc.halcyon.mail").putExtra("url", u.toString()))
+            return
+        } catch (_: ActivityNotFoundException) {}
         try { startActivity(Intent(Intent.ACTION_VIEW, u).addCategory(Intent.CATEGORY_BROWSABLE)) }
         catch (_: ActivityNotFoundException) { Toast.makeText(this, getString(R.string.no_app, u.toString()), Toast.LENGTH_LONG).show() }
     }

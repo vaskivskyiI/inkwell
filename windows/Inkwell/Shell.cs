@@ -24,8 +24,47 @@ public static class Shell
         c.SetValue("", $"\"{Exe}\" \"%1\"");
     }
 
+    /// <summary>HKCU\Software\Inkwell\Windows: where this app is and which server it shows, so Halcyon can hand it
+    /// links to that server (Inkwell.exe --link url).</summary>
+    public static void Announce(string server)
+    {
+        try
+        {
+            using var k = Registry.CurrentUser.CreateSubKey(@"Software\Inkwell\Windows");
+            k.SetValue("Exe", Exe);
+            k.SetValue("Server", Config.Origin(server));
+        }
+        catch { /* Halcyon then opens Inkwell links in the browser */ }
+    }
+
+    /// <summary>An outside http(s) link: Halcyon's app when it is installed and the link is on its server (it
+    /// recorded itself in HKCU\Software\Halcyon\Windows), else the default browser.</summary>
+    public static void OpenLink(string url)
+    {
+        try
+        {
+            using var k = Registry.CurrentUser.OpenSubKey(@"Software\Halcyon\Windows");
+            if (k?.GetValue("Exe") is string exe && k.GetValue("Server") is string server && File.Exists(exe)
+                && server.Length > 0 && Config.Origin(url).Equals(server.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+            {
+                var p = new ProcessStartInfo(exe) { UseShellExecute = false };
+                p.ArgumentList.Add("--link");
+                p.ArgumentList.Add(url);
+                AllowAnyForeground();
+                Process.Start(p);
+                return;
+            }
+        }
+        catch (Exception e) { Log.Write("halcyon link: " + e.Message); }
+        Open(url);
+    }
+
     /// <summary>Uninstall: Inkwell.exe --unregister.</summary>
-    public static void Unregister() => Registry.CurrentUser.DeleteSubKeyTree($@"Software\Classes\{Protocol}", false);
+    public static void Unregister()
+    {
+        Registry.CurrentUser.DeleteSubKeyTree($@"Software\Classes\{Protocol}", false);
+        Registry.CurrentUser.DeleteSubKeyTree(@"Software\Inkwell\Windows", false);
+    }
 
     public static void Open(string target) => Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
 

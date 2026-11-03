@@ -28,6 +28,14 @@ static class Program
             config.Server = connect.Server;
             config.Save();
         }
+        Shell.Announce(config.Server);
+        // A link Halcyon handed over that is not on this server (it changed meanwhile): the browser, no window.
+        if (Array.IndexOf(args, "--link") is var i and >= 0 && i + 1 < args.Length
+            && !Config.Origin(args[i + 1]).Equals(Config.Origin(config.Server), StringComparison.OrdinalIgnoreCase))
+        {
+            if (args[i + 1].StartsWith("http:") || args[i + 1].StartsWith("https:")) Shell.Open(args[i + 1]);
+            return;
+        }
         var main = new MainForm(config, args);
         Listen(main);
         Application.Run(main);
