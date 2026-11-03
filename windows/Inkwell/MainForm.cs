@@ -52,7 +52,7 @@ public sealed class MainForm : Form
 
     void KeepBounds()
     {
-        if (WindowState != FormWindowState.Normal) return;
+        if (WindowState != FormWindowState.Normal || isFull) return;
         config.Bounds = new[] { Bounds.X, Bounds.Y, Bounds.Width, Bounds.Height };
         Save();
     }
@@ -80,6 +80,8 @@ public sealed class MainForm : Form
         core.Settings.IsSwipeNavigationEnabled = false;
         core.Settings.IsPinchZoomEnabled = false;
         core.DocumentTitleChanged += (_, _) => { Text = string.IsNullOrEmpty(core.DocumentTitle) ? "Inkwell" : core.DocumentTitle; };
+        // The page's "Full screen" (a canvas, the page): the whole monitor, over the taskbar. Esc leaves it.
+        core.ContainsFullScreenElementChanged += (_, _) => { pageFull = core.ContainsFullScreenElement; FullScreen(pageFull || keyFull); };
         core.WebMessageReceived += (_, e) => Message(e);
         core.NavigationStarting += (_, e) =>
         {
@@ -180,6 +182,40 @@ public sealed class MainForm : Form
 
     bool Ours(string url) => Origin.Length > 0 && Config.Origin(url).Equals(Origin, StringComparison.OrdinalIgnoreCase);
 
+    // ---- full screen: borderless over the whole monitor (Windows then hides the taskbar), back to the window as it was
+    bool pageFull, keyFull, isFull;
+    FormWindowState wasState;
+    Rectangle wasBounds;
+
+    void FullScreen(bool on)
+    {
+        if (on == isFull) return;
+        isFull = on;
+        if (on)
+        {
+            wasState = WindowState;
+            wasBounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+            var screen = Screen.FromControl(this).Bounds;
+            FormBorderStyle = FormBorderStyle.None;
+            WindowState = FormWindowState.Normal; // a maximised window keeps the taskbar visible
+            Bounds = screen;
+            Shell.Front(this);
+        }
+        else
+        {
+            FormBorderStyle = FormBorderStyle.Sizable;
+            Bounds = wasBounds;
+            WindowState = wasState;
+        }
+    }
+
+    /// <summary>F11 (Bridge.js): the whole app full screen, whatever the page shows; F11 again leaves it.</summary>
+    void ToggleKeyFull()
+    {
+        keyFull = !keyFull;
+        FullScreen(pageFull || keyFull);
+    }
+
     /// <summary>From Bridge.js (only on the server's pages) and from the error page (retry / change server).</summary>
     void Message(CoreWebView2WebMessageReceivedEventArgs e)
     {
@@ -190,6 +226,7 @@ public sealed class MainForm : Form
         if (!local && !Ours(e.Source)) return;
         if (type == "retry" && local) web.CoreWebView2.Navigate($"{Server}/{Home}");
         if (type == "changeServer") ChangeServer();
+        if (type == "fullscreen" && !local) ToggleKeyFull();
     }
 
     /// <summary>A second start of the app (Start menu shortcut, inkwell: link) handed its arguments over.</summary>
@@ -264,6 +301,7 @@ public sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        if (isFull) { keyFull = pageFull = false; FullScreen(false); }
         KeepBounds();
         base.OnFormClosing(e);
     }

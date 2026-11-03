@@ -5,6 +5,8 @@ server** in its own window, set up for writing with a pen:
 
 - No swipe-to-go-back and no zooming of the whole window by pinching: a sideways pen stroke stays a stroke, two
   fingers zoom the paper. Only the pen writes; the mouse and fingers move the paper until ✋ in the pen toolbar is on.
+- Full screen over the whole monitor, taskbar hidden: **F11** for the whole app (F11 again to leave), or the page's
+  *Full screen* button for the paper or the page (Esc to leave).
 - Connect window: the server address, checked with `GET <server>/api/health` before it is saved
   (`%APPDATA%\Inkwell\windows\config.json`). A certificate from your own CA: **Add CA certificate…** there (accepted
   only for that server's host; or install the CA in Windows). The error page has **Change server**.
