@@ -10,7 +10,7 @@ import * as Y from 'yjs';
 import { CANVAS_WIDTH, TOOLS, outline, path2d, hits, strokeInLasso, bounds, sid } from './geometry.js';
 import { recognize, eraseFromStroke } from './shapes.js';
 import { keepKeyboardAway } from './keyboard.js';
-import { CanvasImages, LOCAL, shiftImages } from './CanvasImages.jsx';
+import { CanvasImages, LOCAL, shiftImages, imagesBottom } from './CanvasImages.jsx';
 import { useStore, store, toast, localGet, localSet } from '../store.js';
 import { toolSize, toolColor } from './tools.js';
 
@@ -38,7 +38,7 @@ const scrollParent = (el) => {
 
 // offsetOf(stroke) → vertical shift in logical units (ink anchored to text that moved); anchorFor(stroke) → anchor
 // stored on new strokes; redrawKey: changes when offsets may have changed.
-export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, onHeightChange, autoGrow = false, minHeight = 200, readOnly = false, paper = 'plain', background, onTap, children, onStrokesChange, zoomable = true, offsetOf, anchorFor, redrawKey, spaceable = true, onSpace, images = false, toolOverride }, ref) {
+export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, onHeightChange, autoGrow = false, minHeight = 200, readOnly = false, paper = 'plain', background, onTap, children, onStrokesChange, zoomable = true, offsetOf, anchorFor, redrawKey, spaceable = true, onSpace, images = false, toolOverride, contentBottom }, ref) {
   const offOf = (s) => (s.a && offsetOf ? offsetOf(s) || 0 : 0);
   // The stroke where it is shown (points shifted by its offset), for hit tests and selection.
   const shown = (s) => { const o = offOf(s); return o ? { ...s, p: s.p.map((v, i) => (i % 3 === 1 ? v + o : v)) } : s; };
@@ -122,6 +122,19 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     if (onHeightChange && Math.abs(need - h) > 40 && need > h) onHeightChange(need);
   }
 
+  // Done writing (the canvas lost focus, or the page closes): paper added earlier and left empty goes again. A canvas
+  // with nothing on it keeps the size it was given.
+  function shrink() {
+    if (!onHeightChange || readOnly || g.current) return;
+    const b = bounds(strokes.current.map(shown));
+    const bottom = Math.max(b?.maxY || 0, images ? imagesBottom(doc, canvasId) : 0, contentBottom?.() || 0);
+    if (!bottom && !autoGrow) return;
+    const need = Math.max(minHeight, Math.ceil((bottom + (autoGrow ? 600 : 40)) / 20) * 20);
+    if (h - need > (autoGrow ? 400 : 80)) onHeightChange(need);
+  }
+  // A journal also on leaving the page (a drawing block in a typed page may be leaving because it was deleted).
+  useEffect(() => () => { if (latest.current.autoGrow) try { latest.current.shrink(); } catch { /* doc already gone */ } }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ---- zoom: keeps the point under the fingers / cursor where it is
   const anchor = useRef(null);
   function zoomTo(z, clientX, clientY) {
@@ -159,7 +172,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
   // ---- drawing (observers live across renders: they reach the current render's functions through `latest`)
   const raf = useRef(0);
   const latest = useRef({});
-  latest.current = { redraw, grow, autoGrow, onStrokesChange, zoomTo, zoom };
+  latest.current = { redraw, grow, autoGrow, onStrokesChange, zoomTo, zoom, shrink };
   function schedule() { cancelAnimationFrame(raf.current); raf.current = requestAnimationFrame(() => latest.current.redraw()); }
 
   function setup(c) {
@@ -486,7 +499,8 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
   const W = width * zoom, H = h * scale;
   const sb = !readOnly && !g.current && selBox();
   return (
-    <div ref={wrap} className={`ink-canvas${zoom > 1 ? ' zoomed' : ''}`} style={{ height: H }} tabIndex={readOnly ? -1 : 0} onKeyDown={onKey}>
+    <div ref={wrap} className={`ink-canvas${zoom > 1 ? ' zoomed' : ''}`} style={{ height: H }} tabIndex={readOnly ? -1 : 0} onKeyDown={onKey}
+      onBlur={(e) => { if (!wrap.current?.contains(e.relatedTarget)) shrink(); }}>
       <div className="ink-inner" style={{ width: W || '100%', height: H, ...bg }}>
         {background && <img className="ink-photo" src={background} alt="" draggable={false} />}
         {images && <CanvasImages doc={doc} canvasId={canvasId} scale={scale} active={tool.tool === 'pick'} readOnly={readOnly} onBottom={(b) => { if (onHeightChange && b > h - 40) onHeightChange(Math.ceil((b + 120) / 10) * 10); }} />}

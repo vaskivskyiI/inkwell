@@ -37,7 +37,7 @@ export function JournalView({ note, doc, readOnly }) {
   useEffect(() => () => clearTimeout(reading.current), []);
 
   useEffect(() => {
-    const on = () => { const h = meta.get('height'); if (h && h > height) setHeight(h); };
+    const on = () => { const h = meta.get('height'); if (h && h !== height) setHeight(h); };
     meta.observe(on);
     return () => meta.unobserve(on);
   }, [meta, height]);
@@ -89,6 +89,7 @@ export function JournalView({ note, doc, readOnly }) {
       <div className={`journal-body${showText ? ' split' : ''}`}>
       <div className="journal-paper">
         <InkCanvas ref={canvas} doc={doc} canvasId="page" height={height} minHeight={1400} autoGrow onHeightChange={grow} readOnly={readOnly} paper={paper} images onStrokesChange={onStrokes}
+          contentBottom={() => Math.max(0, ...[...boxes.values()].map((m) => (m.get('y') || 0) + 120))}
           onTap={readOnly ? undefined : addBox} onSpace={(y0, dy) => doc.transact(() => { for (const m of boxes.values()) if (m.get('y') >= y0) m.set('y', Math.max(0, m.get('y') + dy)); })}>
           {(scale) => <>
             {[...boxes.entries()].map(([id, m]) => <TextBox key={id} id={id} map={m} scale={scale} readOnly={readOnly} onDelete={() => boxes.delete(id)} />)}

@@ -45,6 +45,13 @@ export function placeCanvasImage(doc, canvasId, src, size, center) {
 }
 
 /** Insert space moves pictures below the line too. */
+/** The lowest edge of the pictures on a canvas (logical units), 0 without any. Rotation is ignored: near enough. */
+export function imagesBottom(doc, canvasId) {
+  let b = 0;
+  for (const m of doc.getMap('images').values()) if (m.get('canvas') === canvasId) b = Math.max(b, m.get('y') + heightOf(m));
+  return b;
+}
+
 export function shiftImages(doc, canvasId, y0, dy) {
   for (const m of doc.getMap('images').values()) if (m.get('canvas') === canvasId && m.get('y') + heightOf(m) / 2 >= y0) m.set('y', Math.max(0, m.get('y') + dy));
 }
