@@ -3,8 +3,9 @@ import { useEffect, useRef, useState } from 'react';
 import { FilePlus2, PenLine, CalendarDays, RotateCcw, Trash2, Search as SearchIcon, CheckSquare, Mail, ExternalLink, NotebookText, MoveHorizontal, Camera, FileDown, Link2 } from 'lucide-react';
 import { get, post, del, upload, stream } from './api.js';
 import { Markdown } from './ui/Markdown.jsx';
-import { useStore, openNote, toast, toastError, currentSpace, filterSpace, localGet, localSet } from './store.js';
+import { store, useStore, openNote, toast, toastError, currentSpace, filterSpace, localGet, localSet } from './store.js';
 import { newPage, openToday } from './Sidebar.jsx';
+import { markFresh } from './fresh.js';
 import { AskTab } from './RightPanel.jsx';
 import { highlight } from './Palette.jsx';
 
@@ -162,7 +163,8 @@ export function ReviewPage() {
   );
 }
 
-// Also the suite's Home (Halcyon) starting a page here: #/new?do=page | meeting | today (today's journal).
+// Also the suite's Home (Halcyon) and the apps' shortcuts starting a page here: #/new?do=page | meeting | today
+// (today's journal) | hand (a blank handwritten page, pen in hand; dropped again if nothing is written).
 export function NewFromItem({ query }) {
   const [error, setError] = useState(null);
   useEffect(() => {
@@ -170,6 +172,7 @@ export function NewFromItem({ query }) {
     const meta = Object.fromEntries(Object.entries(rest).filter(([, v]) => v));
     const d = new Date(), today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const made = action === 'today' ? post('/api/journal', { date: today })
+      : action === 'hand' ? post('/api/notes', { spaceId: space || currentSpace()?.id, kind: 'journal' }).then((n) => { markFresh(n.id); store.set({ penStart: n.id }); return n; })
       : action === 'page' || action === 'meeting' ? post('/api/notes', { spaceId: space || currentSpace()?.id, kind: 'page', template: action === 'meeting' ? 'meeting' : undefined })
         : post('/api/notes/from-item', { kind, ref, title, meta, spaceId: space || currentSpace()?.id });
     made.then((n) => location.replace(`#/n/${n.id}`)) // replace: Back returns to where the user came from, not here

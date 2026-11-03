@@ -5,7 +5,7 @@ Read this first, then `docs/HANDOFF.md` (state, decisions, gaps) and `docs/PLAN.
 ## What this is
 Inkwell: self-hostable, AI-native notes app (OneNote / Journal / AFFiNE / Notion). Rich text + handwriting, live
 co-editing (Yjs), multi-user with shared spaces, AI in the background, Halcyon integration (mail/calendar/tasks via
-Halcyon's MCP endpoint). Browser first; native Windows/Android apps later use the same REST + Yjs protocol.
+Halcyon's MCP endpoint). Browser (PWA) plus thin native Windows and Android apps that show the server's web app.
 
 ## Layout
 - `server/` Node ≥22, ESM, plain JavaScript, no build. Fastify 5, Hocuspocus 4 (Yjs), pg / PGlite, resvg, perfect-freehand.
@@ -20,6 +20,7 @@ Halcyon's MCP endpoint). Browser first; native Windows/Android apps later use th
   - `src/search.js` FTS + embeddings (RRF) · `src/links.js` page links + reverse lookup · `src/integrations/halcyon.js` MCP client
 - `web/` React 19 + Vite, TipTap 3, no UI library. `src/store.js` tiny global store + hash routing; `src/data.js` loading, events socket, `openDoc()` (Hocuspocus + IndexedDB)
   - `src/editor/` TipTap setup, custom nodes (inkBlock, callout, pageMention), slash menu, selection AI · `src/ink/` InkCanvas, toolbar, JournalView
+- `windows/` WinForms + WebView2 app (C#, .NET 8): pen-friendly window, `inkwell:` links · `android/` Kotlin WebView app: share sheet, shortcuts, camera, print to PDF; `window.inkwellNative` / `window.inkwellAndroid` bridges (`web/src/pwa.js`)
 - `tools/onenote/` Rust source of the OneNote converter
 - `deploy/` podman pod script, nginx · `Dockerfile` · `docker-compose.yml`
 
@@ -29,6 +30,8 @@ npm install && npm run build && npm start      # :8080 (on this Windows box 8080
 npm test                                      # 90 tests, in-memory PGlite, mock AI, real WebSockets
 npm run test:pg -w server                     # API + AI tests via the pg driver
 ./deploy/podman-pod.sh up [--with-ollama]
+dotnet publish windows/Inkwell/Inkwell.csproj -c Release -r win-x64 --self-contained false -o windows/Inkwell/bin/publish-x64
+./android/build-local.sh                      # Linux/WSL, JDK 17 + Android SDK in ~/android-build → dist-apps/Inkwell-<v>.apk
 ```
 
 ## Conventions

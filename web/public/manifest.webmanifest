@@ -9,17 +9,78 @@
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#2563eb",
-  "categories": ["productivity"],
+  "categories": [
+    "productivity"
+  ],
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ],
   "shortcuts": [
-    { "name": "Today's journal", "url": "/#/new?do=today", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
-    { "name": "New page", "url": "/#/new?do=page", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
-    { "name": "Photo to a page", "url": "/#/share?photo=1", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
-    { "name": "Search", "url": "/#/search", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
+    {
+      "name": "Write by hand",
+      "url": "/#/new?do=hand",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Today's journal",
+      "url": "/#/new?do=today",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "New page",
+      "url": "/#/new?do=page",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Photo to a page",
+      "url": "/#/share?photo=1",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "url": "/#/search",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
   ],
   "share_target": {
     "action": "/share-target",
@@ -29,7 +90,20 @@
       "title": "title",
       "text": "text",
       "url": "url",
-      "files": [{ "name": "files", "accept": ["image/*", "application/pdf", "audio/*", "video/*", "text/*", ".md", "*/*"] }]
+      "files": [
+        {
+          "name": "files",
+          "accept": [
+            "image/*",
+            "application/pdf",
+            "audio/*",
+            "video/*",
+            "text/*",
+            ".md",
+            "*/*"
+          ]
+        }
+      ]
     }
   }
 }

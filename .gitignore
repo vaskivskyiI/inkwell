@@ -5,3 +5,4 @@ data/
 deploy/inkwell.env
 deploy/pod.options
 .env
+dist-apps/

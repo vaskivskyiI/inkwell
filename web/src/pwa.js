@@ -5,7 +5,9 @@ import { store, toast } from './store.js';
 
 let deferred = null;
 
-export const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+// Also inside the Windows and Android apps (windows/, android/), which show the server's web app.
+export const nativeApp = () => (typeof window !== 'undefined' && (window.inkwellNative || window.inkwellAndroid)) || null;
+export const standalone = () => !!nativeApp() || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 export const iosDevice = () => /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 export function initPwa() {
@@ -29,6 +31,19 @@ const SHARE = 'inkwell-share';
 
 /** What another app shared with Inkwell: { title, text, url, files: File[] }, or null. */
 export async function takeShared() {
+  // The Android app receives shares itself (its share sheet entry) and hands them over file by file, as base64.
+  const a = typeof window !== 'undefined' && window.inkwellAndroid;
+  if (a?.sharedMeta) {
+    const m = JSON.parse(a.sharedMeta() || 'null');
+    if (!m) return null;
+    const files = m.files.map((f, i) => {
+      const bin = atob(a.sharedFile(i) || '');
+      const bytes = new Uint8Array(bin.length);
+      for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+      return new File([bytes], f.name || `file-${i + 1}`, { type: f.type || '' });
+    });
+    return { title: m.title || '', text: m.text || '', url: m.url || '', files };
+  }
   if (typeof caches === 'undefined') return null;
   const c = await caches.open(SHARE);
   const meta = await c.match('/shared/meta');
@@ -43,5 +58,6 @@ export async function takeShared() {
 }
 
 export async function clearShared() {
+  if (typeof window !== 'undefined' && window.inkwellAndroid?.clearShared) window.inkwellAndroid.clearShared();
   if (typeof caches !== 'undefined') await caches.delete(SHARE);
 }

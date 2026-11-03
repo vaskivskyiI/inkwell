@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="connect_title">Your Inkwell server</string>
+    <string name="connect_intro">Enter the address of your Inkwell server. You sign in on the next page; the app remembers you.</string>
+    <string name="connect_hint">https://notes.example.com</string>
+    <string name="connect_go">Connect</string>
+    <string name="connect_checking">Checking…</string>
+    <string name="connect_http">Plain http: passwords and notes cross the network unencrypted. Use https, or http only over a VPN or your own network.</string>
+    <string name="ca_title">Certificate from your own CA</string>
+    <string name="ca_intro">If the server\'s certificate comes from your own certificate authority, add that CA certificate (.crt, .pem or .cer) here, or install it on the phone: Settings → Security → Encryption &amp; credentials → Install a certificate → CA certificate.</string>
+    <string name="ca_add">Add CA certificate…</string>
+    <string name="ca_clear">Remove</string>
+    <string name="ca_none">No CA certificate added.</string>
+    <string name="sc_hand">Write by hand</string>
+    <string name="sc_hand_short">Write</string>
+    <string name="sc_today">Today\'s journal</string>
+    <string name="sc_today_short">Today</string>
+    <string name="sc_page">New page</string>
+    <string name="sc_photo">Photo to a page</string>
+    <string name="sc_photo_short">Photo</string>
+    <string name="sc_search">Search</string>
+    <string name="share_too_big">Too large to share at once (over %1$d MB)</string>
+    <string name="saved_to">Saved to Downloads: %1$s</string>
+    <string name="download_failed">Download failed: %1$s</string>
+    <string name="no_app">No app on this phone opens %1$s</string>
+    <string name="printing">Preparing the PDF…</string>
+</resources>
