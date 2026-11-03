@@ -248,6 +248,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
 
   function onDown(e) {
     if (e.pointerType === 'pen') penAt = Date.now();
+    if (e.pointerType !== 'touch') pointerKind(e);
     keepKeyboardAway();
     const own = { pid: e.pointerId, type: e.pointerType };
     if (e.pointerType === 'touch') {
@@ -305,7 +306,12 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     }, 550);
   }
 
+  // The pen over the paper writes where its tip is: no cursor then (a mouse gets one, a hand when it moves the paper).
+  const [penHover, setPenHover] = useState(false);
+  const pointerKind = (e) => { const pen = e.pointerType === 'pen'; if (pen !== penHover) setPenHover(pen); };
+
   function onMove(e) {
+    if (e.pointerType !== 'touch') pointerKind(e);
     if (e.pointerType === 'pen') penAt = Date.now(); // hovering counts: the palm comes down before the pen does
     if (e.pointerType === 'touch' && touches.current.has(e.pointerId)) touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const gs = g.current;
@@ -476,7 +482,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     : paper === 'grid' ? { backgroundImage: 'linear-gradient(var(--paper-line) 1px, transparent 1px), linear-gradient(90deg, var(--paper-line) 1px, transparent 1px)', backgroundSize: `${s}px ${s}px` }
       : paper === 'dotted' ? { backgroundImage: 'radial-gradient(var(--paper-dot) 1.2px, transparent 1.4px)', backgroundSize: `${s}px ${s}px` } : {};
 
-  const cursor = readOnly ? 'default' : INKING.includes(tool.tool) && !tool.finger ? 'grab' : tool.tool === 'space' && spaceable ? 'row-resize' : tool.tool === 'eraser' ? 'cell' : tool.tool === 'lasso' ? 'crosshair' : tool.tool === 'text' ? 'text' : 'crosshair';
+  const cursor = readOnly ? 'default' : penHover && INKING.includes(tool.tool) ? 'none' : INKING.includes(tool.tool) && !tool.finger ? 'grab' : tool.tool === 'space' && spaceable ? 'row-resize' : tool.tool === 'eraser' ? 'cell' : tool.tool === 'lasso' ? 'crosshair' : tool.tool === 'text' ? 'text' : 'crosshair';
   const W = width * zoom, H = h * scale;
   const sb = !readOnly && !g.current && selBox();
   return (
