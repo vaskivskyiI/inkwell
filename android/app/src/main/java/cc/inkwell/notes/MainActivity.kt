@@ -71,6 +71,9 @@ class MainActivity : ComponentActivity() {
     private var files: ValueCallback<Array<Uri>>? = null
     private var photo: Uri? = null
     private var permission: PermissionRequest? = null
+    // Signing in with Halcyon (/api/auth/halcyon/start): its sign-in pages show in this WebView until the server takes
+    // over again, so the session lands here (not in the browser or Halcyon's app).
+    @Volatile private var signingIn = false
     private var printing: WebView? = null // kept until Android's print dialog has the page
     private val pool = Executors.newSingleThreadExecutor()
 
@@ -297,7 +300,10 @@ class MainActivity : ComponentActivity() {
 
     /** A link in the page: the server's pages stay, its files are downloaded, PDFs printed, the rest opens outside. */
     private fun link(u: Uri): Boolean {
+        if (ours(u)) signingIn = u.path.orEmpty().startsWith("/api/auth/")
         when {
+            ours(u) && signingIn -> return false
+            !ours(u) && signingIn && u.scheme in listOf("http", "https") -> return false
             isPdf(u) -> print(u)
             ours(u) && u.path.orEmpty().startsWith("/api/") && !u.path.orEmpty().startsWith("/api/public/") -> downloads.fetch(u.toString(), web.settings.userAgentString)
             ours(u) || u.scheme in listOf("blob", "data", "about", "javascript") -> return false

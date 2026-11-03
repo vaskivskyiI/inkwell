@@ -20,6 +20,9 @@ public sealed class MainForm : Form
     string startRoute;
     string? startUrl;
     bool pageOk;
+    // Signing in with Halcyon (/api/auth/halcyon/start): its sign-in pages show in this window until the server takes
+    // over again, so the session lands in this window's profile (not in the browser or Halcyon's app).
+    bool signingIn;
 
     string Server => config.Server;
     string Origin => Config.Origin(config.Server);
@@ -81,7 +84,9 @@ public sealed class MainForm : Form
         core.NavigationStarting += (_, e) =>
         {
             var u = e.Uri;
-            if (Ours(u) || u.StartsWith("about:") || u.StartsWith("data:")) { pageOk = false; return; }
+            if (Ours(u)) { signingIn = Uri.TryCreate(u, UriKind.Absolute, out var p) && p.AbsolutePath.StartsWith("/api/auth/"); pageOk = false; return; }
+            if (u.StartsWith("about:") || u.StartsWith("data:")) { pageOk = false; return; }
+            if (signingIn && (u.StartsWith("https:") || u.StartsWith("http:"))) { pageOk = false; return; }
             // The window only ever shows the server; everything else opens in the default browser.
             e.Cancel = true;
             if (u.StartsWith("http:") || u.StartsWith("https:")) Shell.OpenLink(u);
