@@ -2,7 +2,7 @@
 // element's width, so ink lands in the same place on every device. Pen, highlighter, eraser (whole strokes or
 // partial, also the pen's eraser button), lasso select/move, shape correction (Shapes mode, or hold the pen still at
 // the end of a stroke), pinch / Ctrl+wheel zoom. Touch scrolls instead of drawing once a pen has been used; a palm
-// next to the pen is ignored, and in full screen only two fingers move the paper.
+// next to the pen is ignored; one finger scrolls, two fingers move and zoom the paper.
 import { useEffect, useLayoutEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { Trash2 } from 'lucide-react';
 import * as Y from 'yjs';
@@ -29,7 +29,6 @@ const scrollParent = (el) => {
   return document.scrollingElement;
 };
 
-const inFullscreen = (el) => { try { return !!el?.closest('[data-canvas-full], .fs-fallback, :fullscreen'); } catch { return !!el?.closest('[data-canvas-full], .fs-fallback'); } };
 
 // offsetOf(stroke) → vertical shift in logical units (ink anchored to text that moved); anchorFor(stroke) → anchor
 // stored on new strokes; redrawKey: changes when offsets may have changed.
@@ -271,8 +270,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
       if (e.pointerType === 'touch') { e.preventDefault(); g.current = { kind: 'idle', ...own }; return; }
     }
     if (e.pointerType === 'touch' && penOnlyActive()) {
-      // In full screen one finger does nothing (it is usually the palm); elsewhere it scrolls.
-      g.current = inFullscreen(wrap.current) ? { kind: 'idle', ...own } : { kind: 'scroll', y: e.clientY, x: e.clientX, el: scrollParent(wrap.current), ...own };
+      g.current = { kind: 'scroll', y: e.clientY, x: e.clientX, el: scrollParent(wrap.current), ...own };
       return;
     }
     e.preventDefault();

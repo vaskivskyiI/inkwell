@@ -625,8 +625,11 @@ label.check { display: inline-flex; align-items: center; gap: 6px; }
 .ink-title-close { position: absolute; right: 6px; top: 6px; border: 0; background: transparent; font-size: 18px; line-height: 1; color: var(--muted); }
 .title-pen { align-self: center; opacity: .5; }
 .title-pen:hover { opacity: 1; }
-/* Full-screen paper: no page scrolling under the hand (two fingers move the paper), no buttons to brush against. */
-.note-view[data-canvas-full] .note-scroll { touch-action: none; overscroll-behavior: contain; }
+/* Full-screen paper: no scroll bar or buttons to brush against (fingers, the wheel and the keys still scroll). */
+.note-view[data-canvas-full] .note-scroll, .note-view:fullscreen .note-scroll, .note-view.fs-fallback .note-scroll,
+.ink-block:fullscreen, .ink-block.fs-fallback, .journal:fullscreen, .journal.fs-fallback { overscroll-behavior: contain; scrollbar-width: none; }
+.note-view[data-canvas-full] .note-scroll::-webkit-scrollbar, .note-view:fullscreen .note-scroll::-webkit-scrollbar, .note-view.fs-fallback .note-scroll::-webkit-scrollbar,
+.ink-block:fullscreen::-webkit-scrollbar, .ink-block.fs-fallback::-webkit-scrollbar, .journal:fullscreen::-webkit-scrollbar, .journal.fs-fallback::-webkit-scrollbar { display: none; }
 .note-view[data-canvas-full] .add-paper, .note-view[data-canvas-full] .typed-below, .note-view[data-canvas-full] .typed-below-add { display: none; }
 .tag-bar .chip.suggested .link { color: inherit; }
 .tag-bar .chip.editing { padding: 0 6px; }
