@@ -1,10 +1,10 @@
 // What a page is about, right under its title: the Halcyon e-mails, events and tasks it is linked to, each opening in
 // Halcyon; an e-mail also shows its text and conversation here (read from Halcyon when asked, kept nowhere).
 import { useEffect, useState } from 'react';
-import { Mail, Calendar, CheckSquare, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
+import { Mail, Calendar, CheckSquare, ChevronDown, ChevronRight, ExternalLink, Link2 } from 'lucide-react';
 import { get } from './api.js';
 import { onEvent } from './data.js';
-import { toastError } from './store.js';
+import { toastError, store, useStore, localSet } from './store.js';
 
 const ICONS = { email: Mail, event: Calendar, task: CheckSquare };
 const box = { border: '1px solid var(--border)', borderRadius: 8, padding: '4px 10px', marginTop: 6 };
@@ -47,12 +47,18 @@ function Linked({ noteId, link }) {
   );
 }
 
-export function LinkedItems({ noteId }) {
+export function LinkedItems({ noteId, canEdit = false }) {
   const [links, setLinks] = useState([]);
+  const halcyon = useStore((s) => s.halcyon?.connected);
   useEffect(() => {
     const load = () => get(`/api/notes/${noteId}/links`).then((l) => setLinks(l.filter((x) => ICONS[x.kind]))).catch(toastError);
     load();
     return onEvent((m) => { if (m.type === 'note:links' && m.noteId === noteId) load(); });
   }, [noteId]);
-  return links.map((l) => <Linked key={l.id} noteId={noteId} link={l} />);
+  // Linking more (or the first) e-mail, event or task to this page: the Links panel.
+  const more = () => { store.set({ panel: 'links' }); localSet('panel', 'links'); };
+  return <>
+    {links.map((l) => <Linked key={l.id} noteId={noteId} link={l} />)}
+    {canEdit && halcyon && <button className="link-more" onClick={more} title="Link an e-mail, a meeting or a task to this page"><Link2 size={13} /> {links.length ? 'Link more' : 'Link e-mail, event or task'}</button>}
+  </>;
 }

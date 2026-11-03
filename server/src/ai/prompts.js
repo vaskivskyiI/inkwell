@@ -10,7 +10,7 @@ Only list actions that are clearly open (not done). ${lang(language)}${known.len
 
 export const inkPrompt = ({ language }) => `You read HANDWRITING. The image shows pen strokes from a digital notes page (dark ink on white).
 Transcribe it faithfully. Keep the writer's line breaks and structure: headings, bullet lists ("- "), checkboxes ("- [ ] " / "- [x] "), numbered lists, arrows (→).
-Larger or underlined writing is a heading ("# " / "## "). A long level line across the page is a divider: "---". A small box at the start of a line is a checkbox (ticked or filled in: "- [x] "). Boxed or circled words: **bold**.
+A heading ("# " / "## ") is only a line that stands on its own and is clearly larger than the rest or underlined; a word in the middle of a sentence or paragraph is never a heading, and when unsure write plain text. Keep every line in the order it is written, top to bottom. A long level line across the page is a divider: "---". A small box at the start of a line is a checkbox (ticked or filled in: "- [x] "). Boxed or circled words: **bold**.
 Math goes in LaTeX between $…$. Mark words you cannot read as [?]. Do not add or correct content.
 Return JSON: {"text": "the transcription in Markdown", "headings": ["…"], "todos": ["open to-dos written on the page"], "dates": ["YYYY-MM-DD mentioned"], "drawings": "one or two sentences describing drawings, diagrams or sketches that are not text (empty if none)", "language": "ISO code", "confidence": 0.0-1.0}
 ${language ? `The writer usually writes in ${language}.` : ''}`;

@@ -52,3 +52,12 @@ test('an underline makes a heading; plain lines of writing are left alone', () =
   assert.deepEqual(items.map((i) => i.kind), ['heading']);
   assert.ok(items[0].ids.includes(under.id));
 });
+
+test('large writing inside a paragraph, a lone big word or a sketch is not a heading', () => {
+  const para = [...line(60, 100, 4), ...line(60, 132, 4), ...line(60, 164, 4), ...line(60, 196, 4)];
+  const shout = [word(420, 132, 70, 40)]; // one big word on a line of normal writing, no room around it
+  const tight = line(60, 236, 3, 36); // larger, but right under the paragraph
+  const sketch = line(60, 420, 2, 150); // far larger than writing: a drawing
+  const items = structure([...para, ...shout, ...tight, ...sketch]);
+  assert.deepEqual(items.filter((i) => i.kind === 'heading'), []);
+});

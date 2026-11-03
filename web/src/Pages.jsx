@@ -1,6 +1,6 @@
 // Home, search results, trash and the full-page assistant.
 import { useEffect, useRef, useState } from 'react';
-import { FilePlus2, PenLine, CalendarDays, RotateCcw, Trash2, Search as SearchIcon, CheckSquare, Mail, ExternalLink, NotebookText, MoveHorizontal, Camera, FileDown } from 'lucide-react';
+import { FilePlus2, PenLine, CalendarDays, RotateCcw, Trash2, Search as SearchIcon, CheckSquare, Mail, ExternalLink, NotebookText, MoveHorizontal, Camera, FileDown, Link2 } from 'lucide-react';
 import { get, post, del, upload, stream } from './api.js';
 import { Markdown } from './ui/Markdown.jsx';
 import { useStore, openNote, toast, toastError, currentSpace, filterSpace, localGet, localSet } from './store.js';
@@ -171,6 +171,55 @@ export function NewFromItem({ query }) {
   return <div className="note-loading"><span className="spinner" /> Opening the note…</div>;
 }
 
+const ITEM = { event: [CalendarDays, 'event'], email: [Mail, 'e-mail'], task: [CheckSquare, 'task'] };
+const itemQuery = (kind, ref, title, meta = {}) => new URLSearchParams(Object.entries({ kind, ref, title, ...meta })
+  .filter(([, v]) => v != null && v !== '' && typeof v !== 'object').map(([k, v]) => [k, String(v)])).toString();
+
+// An e-mail, event or task linked to a page that already exists (#/link?kind=…&ref=…&title=…, same details as
+// #/new): from Home here, or from Halcyon's "Link to a page".
+export function LinkToPage({ query }) {
+  const { kind, ref, title, space, do: _, ...rest } = query;
+  const meta = Object.fromEntries(Object.entries(rest).filter(([, v]) => v));
+  const [q, setQ] = useState('');
+  const [pages, setPages] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => (q.trim() ? get(`/api/search?q=${encodeURIComponent(q)}&limit=30&semantic=0`) : get('/api/recent?limit=30'))
+      .then((r) => setPages(r.filter((p) => !p.role || ['owner', 'editor'].includes(p.role)))).catch(toastError), q ? 200 : 0);
+    return () => clearTimeout(t);
+  }, [q]);
+  if (!ITEM[kind] || !ref) return <div className="empty-state"><h2>Nothing to link</h2><a href="#/">Go home</a></div>;
+  const [Icon, label] = ITEM[kind];
+  const link = async (p) => {
+    setBusy(true);
+    try {
+      await post(`/api/notes/${p.id}/links`, { kind, ref, title, meta });
+      toast(`Linked to “${p.title || 'Untitled'}”`);
+      location.replace(`#/n/${p.id}`);
+    } catch (e) { toastError(e); setBusy(false); }
+  };
+  return (
+    <div className="page-col link-to-page">
+      <h1>Link to a page</h1>
+      <p className="link-item"><Icon size={16} /> <b>{title || `The ${label}`}</b>{meta.start && <span className="muted"> · {new Date(meta.start).toLocaleString()}</span>}{meta.from && <span className="muted"> · {meta.from}</span>}</p>
+      <div className="search-box"><SearchIcon size={18} /><input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find the page…" aria-label="Find the page" /></div>
+      {pages === null ? <span className="spinner" /> : (
+        <div className="results">
+          {pages.map((p) => (
+            <button key={p.id} className="list-item" disabled={busy} onClick={() => link(p)}>
+              <span>{p.icon || (p.kind === 'journal' ? '✍️' : '📄')}</span>
+              <span className="grow"><b>{p.title || 'Untitled'}</b>{p.snippet && <span className="muted small"> {p.snippet.slice(0, 90)}</span>}</span>
+              <span className="muted small">Link</span>
+            </button>
+          ))}
+          {!pages.length && <p className="muted">No pages found.</p>}
+        </div>
+      )}
+      <p><a href={`#/new?${itemQuery(kind, ref, title, { ...meta, space })}`} onClick={(e) => { e.preventDefault(); location.replace(e.currentTarget.getAttribute('href')); }}><FilePlus2 size={14} /> A new note instead</a></p>
+    </div>
+  );
+}
+
 const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const dueOf = (iso) => {
   if (!iso) return { label: '', late: false };
@@ -212,6 +261,7 @@ function Today({ highlight }) {
       <span className={`when${late ? ' late' : ''}`}>{when}</span>
       <span className="grow"><b>{it.title}</b>{(sub || it.meta.source) && <span className="sub">{[it.meta.source, sub].filter(Boolean).join(' · ')}</span>}</span>
       <a className="ext" href={it.openUrl} title="Open in Halcyon"><ExternalLink size={14} /></a>
+      <a className="ext" href={`#/link?${itemQuery(it.kind, it.ref, it.title, it.kind === 'event' ? { ...it.meta, day: it.meta.allDay ? it.meta.start.slice(0, 10) : localDay(new Date(it.meta.start)) } : it.meta)}`} title="Link to a page you already have"><Link2 size={14} /></a>
       <button onClick={() => open(it)}>{notes[`${it.kind}:${it.ref}`] ? <><NotebookText size={14} /> Open note</> : <><FilePlus2 size={14} /> Note</>}</button>
     </div>
   );

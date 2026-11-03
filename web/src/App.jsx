@@ -7,7 +7,7 @@ import { loadSpaces, loadTree, loadFavorites, connectEvents, switchSpace } from 
 import { setUnauthorizedHandler } from './api.js';
 import { Sidebar, newPage, openToday } from './Sidebar.jsx';
 import { NoteView } from './NoteView.jsx';
-import { HomePage, SearchPage, TrashPage, AskPage, NewFromItem, SmartPage, ReviewPage } from './Pages.jsx';
+import { HomePage, SearchPage, TrashPage, AskPage, NewFromItem, LinkToPage, SmartPage, ReviewPage } from './Pages.jsx';
 import { SettingsPage } from './Settings.jsx';
 import { CalendarPage } from './Calendar.jsx';
 import { SharePage } from './Share.jsx';
@@ -81,6 +81,7 @@ export function App() {
   else if (route.name === 'ask') main = <div className="scroll"><AskPage /></div>;
   else if (route.name === 'review') main = <div className="scroll"><ReviewPage /></div>;
   else if (route.name === 'new') main = <NewFromItem query={route.query} />;
+  else if (route.name === 'link') main = <div className="scroll"><LinkToPage query={route.query} /></div>;
   else if (route.name === 'share') main = <div className="scroll"><SharePage photo={route.query.photo === '1'} /></div>;
   else if (route.name === 'calendar') main = <div className="scroll"><CalendarPage day={route.id} /></div>;
   else if (route.name === 'smart') main = <div className="scroll"><SmartPage cat={route.id} sub={route.query.sub} /></div>;

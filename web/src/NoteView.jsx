@@ -92,7 +92,7 @@ export function NoteView({ id }) {
             <span title={new Date(detail.updatedAt).toLocaleString()}>Edited {stamp(detail.updatedAt)}{detail.updatedByUser ? ` by ${detail.updatedByUser.name}` : ''}</span>
           </div>
           {ready && <TagBar detail={detail} doc={handle.doc} readOnly={readOnly} />}
-          <LinkedItems noteId={id} />
+          <LinkedItems noteId={id} canEdit={['owner', 'editor'].includes(detail.role) && !detail.deletedAt} />
           {detail.deletedAt && <div className="banner">This page is in the trash. <button onClick={() => post(`/api/notes/${id}/restore`).then(loadDetail).catch(toastError)}>Restore</button></div>}
           {!ready ? <div className="note-loading"><span className="spinner" /></div>
             : detail.kind === 'journal' ? <>

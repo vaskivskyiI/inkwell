@@ -66,7 +66,8 @@ export function structure(strokes, { width = 1000 } = {}) {
     l.h = median(l.items.filter((x) => x.h >= 6).map((x) => x.h)) || (l.y1 - l.y0);
     l.items.sort((a, b) => a.x0 - b.x0);
   }
-  const typical = median(lines.filter((l) => l.items.length > 1).map((l) => l.h)) || median(lines.map((l) => l.h)) || 30;
+  const wordy = lines.filter((l) => l.items.length > 2);
+  const typical = median((wordy.length >= 2 ? wordy : lines.filter((l) => l.items.length > 1)).map((l) => l.h)) || median(lines.map((l) => l.h)) || 30;
 
   const items = [];
   const add = (kind, o, extra = {}) => items.push({ kind, key: `${kind}:${o.key || o.items?.[0]?.id || o.id}`, x0: o.x0, y0: o.y0, x1: o.x1, y1: o.y1, ...extra });
@@ -79,17 +80,21 @@ export function structure(strokes, { width = 1000 } = {}) {
     if (l) { underlined.add(l); l.under = u; } else if (u.w >= 0.3 * width) add('divider', u, { ids: [u.id] });
   }
 
-  for (const l of lines) {
-    const big = lines.length > 1 && l.h >= 1.5 * typical;
+  lines.forEach((l, i) => {
+    // Larger writing is a heading only when it stands on its own: several lines to compare with, a few words wide,
+    // not a drawing (far larger) and with room above it — a big word in the middle of a paragraph is not one.
+    const prev = lines[i - 1], next = lines[i + 1];
+    const alone = (!prev || l.y0 - prev.y1 > 0.35 * typical) && (!next || next.y0 - l.y1 > 0.2 * typical);
+    const big = lines.length > 2 && l.h >= 1.6 * typical && l.h <= 4 * typical && l.x1 - l.x0 >= 2.5 * typical && alone;
     if (big || underlined.has(l)) {
       add('heading', l, { level: l.h >= 2.1 * typical ? 1 : big ? 2 : 3, ids: [...l.items.map((x) => x.id), ...(l.under ? [l.under.id] : [])] });
     } else {
       // A dot or a short dash first, then a gap, then the words.
-      const [first, next] = l.items;
+      const [first, second] = l.items;
       const h = Math.max(l.h, 12);
-      if (first && next && first.w <= 0.9 * h && first.h <= 0.45 * h && Math.abs(first.cy - l.mid) < 0.4 * h && next.x0 - first.x1 > 0.25 * h) add('bullet', { ...l, key: first.id }, { ids: l.items.map((x) => x.id) });
+      if (first && second && first.w <= 0.9 * h && first.h <= 0.45 * h && Math.abs(first.cy - l.mid) < 0.4 * h && second.x0 - first.x1 > 0.25 * h) add('bullet', { ...l, key: first.id }, { ids: l.items.map((x) => x.id) });
     }
-  }
+  });
 
   for (const { b, inner } of checks) {
     const l = lines.find((x) => b.cy > x.mid - Math.max(x.h, b.h) && b.cy < x.mid + Math.max(x.h, b.h) && x.x0 >= b.x1 - 6 && x.x0 - b.x1 < 4 * Math.max(x.h, 20));
