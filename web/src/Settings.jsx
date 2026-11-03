@@ -5,6 +5,7 @@ import { installApp, standalone, iosDevice } from './pwa.js';
 import { store, useStore, navigate, openNote, toast, toastError, localGet } from './store.js';
 import { loadSpaces, switchSpace, loadTree } from './data.js';
 import { setTheme } from './theme.js';
+import { setInkTool } from './ink/tools.js';
 
 const SECTIONS = [['profile', 'Profile', User], ['spaces', 'Spaces & sharing', Layers], ['ai', 'AI', Sparkles], ['pen', 'Pen & paper', PenLine], ['integrations', 'Integrations', Plug], ['import', 'Import', Upload], ['tokens', 'Apps & tokens', KeyRound], ['admin', 'Administration', Shield]];
 
@@ -370,6 +371,7 @@ function AiSettings() {
 
 function PenSettings() {
   const settings = useStore((s) => s.settings);
+  const inkTool = useStore((s) => s.inkTool);
   if (!settings) return null;
   return (
     <>
@@ -377,8 +379,8 @@ function PenSettings() {
       <Field label="Paper for new journal pages">
         <div className="seg">{['ruled', 'grid', 'dotted', 'plain'].map((p) => <button key={p} className={settings.paper === p ? 'on' : ''} onClick={() => saveSettings({ paper: p })}>{p}</button>)}</div>
       </Field>
-      <Field label="Touch and pen" hint="Automatic: once you use a pen, fingers scroll and only the pen writes (palm rejection).">
-        <div className="seg">{[['auto', 'Automatic'], ['on', 'Pen only'], ['off', 'Fingers draw too']].map(([v, l]) => <button key={v} className={settings.penOnly === v ? 'on' : ''} onClick={() => saveSettings({ penOnly: v })}>{l}</button>)}</div>
+      <Field label="Drawing on this device" hint="Only the pen draws: fingers and the mouse move and zoom the paper (two fingers zoom). The ✋ button in the pen toolbar switches this too.">
+        <div className="seg">{[[false, 'Pen only'], [true, 'Finger and mouse draw too']].map(([v, l]) => <button key={String(v)} className={!!inkTool.finger === v ? 'on' : ''} onClick={() => setInkTool({ finger: v })}>{l}</button>)}</div>
       </Field>
       <h3>Shortcuts on a canvas</h3>
       <p className="hint">P pen · H highlighter · E eraser · L lasso (select, drag to move, Delete) · S insert space (drag down for room, up to close a gap) · T text box (journal) · Ctrl+Z / Ctrl+Y undo/redo. The pen's eraser end and barrel button erase.</p>

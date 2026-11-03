@@ -47,7 +47,7 @@ import java.util.concurrent.Executors
 
 /**
  * The user's Inkwell server in a WebView, set up for the pen (S-Pen pressure reaches the page as pointer events; the
- * WebView itself does not zoom, the paper does). Launcher shortcuts say where to go (EXTRA_ROUTE, a hash route like
+ * paper zooms itself under two fingers, typed pages zoom like in the browser). Launcher shortcuts say where to go (EXTRA_ROUTE, a hash route like
  * "#/new?do=hand"); the share sheet hands photos, files, text and links to the web app's share page through
  * window.inkwellAndroid (web/src/pwa.js takeShared).
  */
@@ -194,9 +194,10 @@ class MainActivity : ComponentActivity() {
             databaseEnabled = true
             javaScriptCanOpenWindowsAutomatically = true
             setSupportMultipleWindows(true)
-            // The paper zooms with two fingers itself; the page as a whole stays put under the pen.
-            setSupportZoom(false)
-            builtInZoomControls = false
+            // Two fingers zoom typed pages like in the browser (no +/- buttons); on the paper the page zooms itself.
+            setSupportZoom(true)
+            builtInZoomControls = true
+            displayZoomControls = false
             mediaPlaybackRequiresUserGesture = true
             allowFileAccess = false
             allowContentAccess = true

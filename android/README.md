@@ -3,8 +3,8 @@
 A native Android app (Kotlin, `android/`) that shows your Inkwell server in a WebView and adds what a web page cannot
 do well on a phone or tablet:
 
-- **Pen**: S-Pen and other styluses reach the page with pressure; the WebView itself does not zoom (two fingers zoom
-  the paper), and the page's palm rejection works as in the browser.
+- **Pen**: S-Pen and other styluses reach the page with pressure. Only the pen writes: one finger scrolls, two
+  fingers zoom the paper (typed pages zoom like in the browser). ✋ in the pen toolbar lets a finger draw too.
 - **Share sheet**: photos, files, text and links shared from other apps go to Inkwell's share page — into the page
   you are working on (on any device) or a new page. Up to 200 MB at once.
 - **Launcher shortcuts** (long-press the icon): Write by hand, Today's journal, Photo to a page, New page, Search.

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { addCanvasImage } from './CanvasImages.jsx';
 import { toggleCanvasFullscreen } from '../ui/fullscreen.js';
-import { PenLine, Highlighter, Eraser, Lasso, Type, Undo2, Redo2, Trash2, ScanText, Shapes, ZoomIn, ZoomOut, Scissors, Maximize2, Minimize2, UnfoldVertical, ImagePlus, Camera, MousePointer2, Plus, SlidersHorizontal } from 'lucide-react';
+import { PenLine, Highlighter, Eraser, Lasso, Type, Undo2, Redo2, Trash2, ScanText, Shapes, ZoomIn, ZoomOut, Scissors, Maximize2, Minimize2, UnfoldVertical, ImagePlus, Camera, MousePointer2, Plus, SlidersHorizontal, Hand } from 'lucide-react';
 import { useStore } from '../store.js';
 import { COLORS, HL, SIZES, RANGE, PALETTE, setInkTool, toolSize, toolColor, setToolSize, setToolColor } from './tools.js';
 
@@ -40,6 +40,8 @@ export function InkToolbar({ canvas, text = false, space = true, onTranscribe, c
         </button>
       ))}
       {drawing && <SizePicker kind={kind} size={size} on={!SIZES[kind].includes(size)} />}
+      <button className={t.finger ? 'on' : ''} title={t.finger ? 'Finger and mouse draw too — click so only the pen draws (fingers and mouse then move and zoom the paper)' : 'Only the pen draws — click to draw with a finger or the mouse too'}
+        aria-label="Draw with finger and mouse" aria-pressed={!!t.finger} onClick={() => setInkTool({ finger: !t.finger })}><Hand size={17} /></button>
       {t.tool === 'pen' && <button className={t.shapes ? 'on' : ''} title="Shapes: straighten lines and snap shapes when you lift the pen (handwriting is left alone). Holding the pen still at the end of a stroke always snaps." aria-label="Shape correction" onClick={() => setInkTool({ shapes: !t.shapes })}><Shapes size={17} /></button>}
       {t.tool === 'eraser' && (
         <>

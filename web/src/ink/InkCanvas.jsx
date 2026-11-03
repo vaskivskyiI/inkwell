@@ -1,8 +1,9 @@
 // A handwriting surface bound to a Y.Array of strokes (doc.ink[canvasId]). Logical width 1000 units, scaled to the
 // element's width, so ink lands in the same place on every device. Pen, highlighter, eraser (whole strokes or
 // partial, also the pen's eraser button), lasso select/move, shape correction (Shapes mode, or hold the pen still at
-// the end of a stroke), pinch / Ctrl+wheel zoom. Touch scrolls instead of drawing once a pen has been used; a palm
-// next to the pen is ignored; one finger scrolls, two fingers move and zoom the paper.
+// the end of a stroke), pinch / Ctrl+wheel zoom. Only the pen draws, unless "Draw with finger and mouse" is on
+// (inkTool.finger): otherwise one finger or the mouse moves the paper, two fingers move and zoom it, and a palm next
+// to the pen is ignored.
 import { useEffect, useLayoutEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { Trash2 } from 'lucide-react';
 import * as Y from 'yjs';
@@ -10,16 +11,21 @@ import { CANVAS_WIDTH, TOOLS, outline, path2d, hits, strokeInLasso, bounds, sid 
 import { recognize, eraseFromStroke } from './shapes.js';
 import { keepKeyboardAway } from './keyboard.js';
 import { CanvasImages, LOCAL, shiftImages } from './CanvasImages.jsx';
-import { useStore, store } from '../store.js';
+import { useStore, store, toast, localGet, localSet } from '../store.js';
 import { toolSize, toolColor } from './tools.js';
 
 const MAX_ZOOM = 3;
-let penSeen = false;
 let penAt = 0; // last time the pen touched or hovered: touches right after are the hand resting on the screen
-export const penOnlyActive = () => {
-  const mode = store.get().settings?.penOnly || 'auto';
-  return mode === 'on' || (mode === 'auto' && penSeen);
-};
+export const penOnlyActive = () => !store.get().inkTool?.finger;
+const INKING = ['pen', 'hl', 'eraser'];
+let hinted = false;
+// Someone without a pen tries to draw: say once how.
+function fingerHint() {
+  if (hinted || localGet('fingerHint')) return;
+  hinted = true;
+  localSet('fingerHint', '1');
+  toast('Only the pen writes here. To draw with a finger or the mouse, turn on ✋ in the toolbar.');
+}
 
 const scrollParent = (el) => {
   for (let p = el?.parentElement; p; p = p.parentElement) {
@@ -241,7 +247,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
   const inSel = (p) => { const b = selBox(); return !!b && p[0] > b.minX - 14 && p[0] < b.maxX + 14 && p[1] > b.minY - 14 && p[1] < b.maxY + 14; };
 
   function onDown(e) {
-    if (e.pointerType === 'pen') { penSeen = true; penAt = Date.now(); }
+    if (e.pointerType === 'pen') penAt = Date.now();
     keepKeyboardAway();
     const own = { pid: e.pointerId, type: e.pointerType };
     if (e.pointerType === 'touch') {
@@ -269,8 +275,10 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
       clearSelection();
       if (e.pointerType === 'touch') { e.preventDefault(); g.current = { kind: 'idle', ...own }; return; }
     }
-    if (e.pointerType === 'touch' && penOnlyActive()) {
-      g.current = { kind: 'scroll', y: e.clientY, x: e.clientX, el: scrollParent(wrap.current), ...own };
+    // A finger or the mouse with a drawing tool moves the paper (unless they may draw); the pen always draws.
+    if (e.pointerType !== 'pen' && !eraser && INKING.includes(tool.tool) && !tool.finger) {
+      if (e.pointerType === 'mouse') { e.preventDefault(); live.current.setPointerCapture(e.pointerId); }
+      g.current = { kind: 'scroll', y: e.clientY, x: e.clientX, el: scrollParent(wrap.current), moved: 0, ...own };
       return;
     }
     e.preventDefault();
@@ -314,7 +322,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     }
     // Only the pointer that started the gesture moves it (not a palm or a second finger).
     if (e.pointerId !== gs.pid || gs.kind === 'idle') return;
-    if (gs.kind === 'scroll') { gs.el.scrollBy(0, gs.y - e.clientY); wrap.current.scrollLeft += gs.x - e.clientX; gs.x = e.clientX; gs.y = e.clientY; return; }
+    if (gs.kind === 'scroll') { gs.moved += Math.abs(gs.y - e.clientY) + Math.abs(gs.x - e.clientX); gs.el.scrollBy(0, gs.y - e.clientY); wrap.current.scrollLeft += gs.x - e.clientX; gs.x = e.clientX; gs.y = e.clientY; return; }
     const events = e.getCoalescedEvents?.() || [e];
     if (gs.kind === 'draw') {
       if (gs.snapped) return;
@@ -342,6 +350,8 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     if (gs?.kind === 'pinch') { if (touches.current.size < 2) g.current = null; return; }
     if (!gs || (e && e.pointerId !== gs.pid)) return;
     g.current = null;
+    // The mouse dragged on the paper and nothing happened: it may be someone without a pen.
+    if (gs.kind === 'scroll' && gs.type === 'mouse' && !readOnly) fingerHint();
     clearTimeout(gs.hold);
     clearLive();
     if (gs.kind === 'draw') {
@@ -466,7 +476,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     : paper === 'grid' ? { backgroundImage: 'linear-gradient(var(--paper-line) 1px, transparent 1px), linear-gradient(90deg, var(--paper-line) 1px, transparent 1px)', backgroundSize: `${s}px ${s}px` }
       : paper === 'dotted' ? { backgroundImage: 'radial-gradient(var(--paper-dot) 1.2px, transparent 1.4px)', backgroundSize: `${s}px ${s}px` } : {};
 
-  const cursor = readOnly ? 'default' : tool.tool === 'space' && spaceable ? 'row-resize' : tool.tool === 'eraser' ? 'cell' : tool.tool === 'lasso' ? 'crosshair' : tool.tool === 'text' ? 'text' : 'crosshair';
+  const cursor = readOnly ? 'default' : INKING.includes(tool.tool) && !tool.finger ? 'grab' : tool.tool === 'space' && spaceable ? 'row-resize' : tool.tool === 'eraser' ? 'cell' : tool.tool === 'lasso' ? 'crosshair' : tool.tool === 'text' ? 'text' : 'crosshair';
   const W = width * zoom, H = h * scale;
   const sb = !readOnly && !g.current && selBox();
   return (
