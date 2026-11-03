@@ -1,8 +1,9 @@
 // A pen-first journal page: endless paper (ruled / grid / dotted / plain), ink anywhere, typed text boxes.
 import { useRef, useState, useEffect } from 'react';
 import * as Y from 'yjs';
-import { GripHorizontal, Plus, X, FileText, Copy, ScanText } from 'lucide-react';
-import { InkCanvas } from './InkCanvas.jsx';
+import { GripHorizontal, Plus, X, FileText, Copy, ScanText, ListTree, Square, SquareCheck, Highlighter, Circle, Dot } from 'lucide-react';
+import { InkCanvas, penOnlyActive } from './InkCanvas.jsx';
+import { structure, sectionIds } from './structure.js';
 import { InkToolbar, toolKey, setInkTool, FullscreenButton } from './InkToolbar.jsx';
 import { sid } from './geometry.js';
 import { useYObserve, applyText } from '../ui/ytext.js';
@@ -24,6 +25,16 @@ export function JournalView({ note, doc, readOnly }) {
   const [height, setHeight] = useState(() => meta.get('height') || 1400);
   const [showText, setShowText] = useState(false);
   const rec = useStore((s) => s.inkText[note.id]?.page);
+  const showMarks = useStore((s) => s.inkTool.marks !== false);
+  const [items, setItems] = useState([]);
+  const strokesNow = useRef([]);
+  const reading = useRef(0);
+  const onStrokes = (strokes) => {
+    strokesNow.current = strokes;
+    clearTimeout(reading.current);
+    reading.current = setTimeout(() => setItems(structure(strokes)), 300);
+  };
+  useEffect(() => () => clearTimeout(reading.current), []);
 
   useEffect(() => {
     const on = () => { const h = meta.get('height'); if (h && h > height) setHeight(h); };
@@ -40,7 +51,9 @@ export function JournalView({ note, doc, readOnly }) {
     root.current?.focus({ preventScroll: true });
   }, [note.id, readOnly]);
 
-  const grow = (h) => { setHeight(h); if (!readOnly) meta.set('height', h); };
+  const grow = (h) => { if (h === height) return; setHeight(h); if (!readOnly) meta.set('height', h); };
+  // A palm brushing the button while writing must not add paper (the pen or a mouse does).
+  const paperBy = useRef('');
 
   // A photo from another device: in the middle of what this screen shows.
   useDrops(note.id, (url, size) => placeCanvasImage(doc, 'page', url, size, canvas.current?.viewCenter() || { x: 500, y: 200 }), !readOnly);
@@ -63,7 +76,10 @@ export function JournalView({ note, doc, readOnly }) {
       {readOnly && <button className="recognized-toggle" onClick={() => setShowText(!showText)}><FileText size={15} /> Recognized text</button>}
       {!readOnly && (
         <div className="journal-tools">
-          <InkToolbar canvas={canvas} text onTranscribe={transcribe} imageTarget={{ doc, canvasId: 'page', noteId: note.id }} extra={<FullscreenButton selector=".journal" />} />
+          <InkToolbar canvas={canvas} text onTranscribe={transcribe} imageTarget={{ doc, canvasId: 'page', noteId: note.id }} extra={<>
+            <button className={showMarks ? 'on' : ''} title="Mark headings, to-dos, lists, boxes and dividers in the margin" aria-label="Page structure" onClick={() => setInkTool({ marks: !showMarks })}><ListTree size={17} /></button>
+            <FullscreenButton selector=".journal" />
+          </>} />
           <button className={`recognized-toggle${showText ? ' on' : ''}`} title="Show what AI read on this page" onClick={() => setShowText(!showText)}><FileText size={15} /> Recognized text</button>
           <select value={paper} onChange={(e) => meta.set('paper', e.target.value)} aria-label="Paper">
             {PAPERS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
@@ -72,16 +88,55 @@ export function JournalView({ note, doc, readOnly }) {
       )}
       <div className={`journal-body${showText ? ' split' : ''}`}>
       <div className="journal-paper">
-        <InkCanvas ref={canvas} doc={doc} canvasId="page" height={height} minHeight={1400} autoGrow onHeightChange={grow} readOnly={readOnly} paper={paper} images
+        <InkCanvas ref={canvas} doc={doc} canvasId="page" height={height} minHeight={1400} autoGrow onHeightChange={grow} readOnly={readOnly} paper={paper} images onStrokesChange={onStrokes}
           onTap={readOnly ? undefined : addBox} onSpace={(y0, dy) => doc.transact(() => { for (const m of boxes.values()) if (m.get('y') >= y0) m.set('y', Math.max(0, m.get('y') + dy)); })}>
-          {(scale) => [...boxes.entries()].map(([id, m]) => <TextBox key={id} id={id} map={m} scale={scale} readOnly={readOnly} onDelete={() => boxes.delete(id)} />)}
+          {(scale) => <>
+            {[...boxes.entries()].map(([id, m]) => <TextBox key={id} id={id} map={m} scale={scale} readOnly={readOnly} onDelete={() => boxes.delete(id)} />)}
+            {showMarks && <Marks items={items} scale={scale} doc={doc} readOnly={readOnly}
+              onSelect={(it) => canvas.current?.select(it.kind === 'heading' ? sectionIds(strokesNow.current, items, it) : it.ids)}
+              onSpace={(e, y) => canvas.current?.startSpace(e, y)} />}
+          </>}
         </InkCanvas>
-        {!readOnly && <button className="add-paper" onClick={() => grow(height + 1000)}><Plus size={15} /> More paper</button>}
+        {!readOnly && <button className="add-paper" onPointerDown={(e) => { paperBy.current = e.pointerType; }}
+          onClick={() => { if (paperBy.current === 'touch' && penOnlyActive()) return; grow(height + 1000); }}><Plus size={15} /> More paper</button>}
       </div>
       {showText && <RecognizedText rec={rec} note={note} onRead={transcribe} readOnly={readOnly} />}
       </div>
     </div>
   );
+}
+
+const MARK = { heading: null, divider: GripHorizontal, bullet: Dot, box: Square, circled: Circle, highlight: Highlighter };
+const TIP = {
+  heading: 'Heading — tap to select its section', divider: 'Divider — drag to make or close space below', bullet: 'List item — tap to select',
+  box: 'Boxed — tap to select', circled: 'Circled — tap to select', highlight: 'Highlighted — tap to select', todo: 'To-do — tap to tick it off',
+};
+
+// What the page's structure looks like, in the left margin: headings, to-dos (tick them here), dividers (drag them
+// to make room), list items, boxed, circled and highlighted parts.
+function Marks({ items, scale, doc, readOnly, onSelect, onSpace }) {
+  const ticks = doc.getMap('ticks');
+  useYObserve(ticks);
+  const used = [];
+  return items.map((it) => {
+    const y = ((it.y0 + it.y1) / 2) * scale - 11;
+    // Marks on the same line sit side by side.
+    const n = used.filter((u) => Math.abs(u - y) < 18).length;
+    used.push(y);
+    const left = Math.max(2, (it.kind === 'todo' ? it.mark.x0 : it.x0) * scale - 28 - n * 24);
+    const style = { left, top: y };
+    if (it.kind === 'todo') {
+      const done = ticks.get(it.box) ?? it.done;
+      const m = it.mark;
+      return <span key={it.key}>
+        <button className={`ink-mark todo${done ? ' done' : ''}`} style={style} title={TIP.todo} aria-label={done ? 'Done to-do' : 'Open to-do'} disabled={readOnly} onClick={() => ticks.set(it.box, !done)}>{done ? <SquareCheck size={14} /> : <Square size={14} />}</button>
+        {done && !it.done && <svg className="ink-tick" style={{ left: m.x0 * scale, top: m.y0 * scale, width: (m.x1 - m.x0) * scale, height: (m.y1 - m.y0) * scale }} viewBox="0 0 10 10"><path d="M2 5.5 4.2 7.6 8.2 2.6" /></svg>}
+      </span>;
+    }
+    const Icon = MARK[it.kind];
+    if (it.kind === 'divider') return <span key={it.key} className="ink-mark divider" style={{ left: 2, top: y }} title={TIP.divider} onPointerDown={(e) => !readOnly && onSpace(e, it.y1 + 3)}><Icon size={14} /></span>;
+    return <button key={it.key} className={`ink-mark ${it.kind}`} style={style} title={TIP[it.kind]} onClick={() => onSelect(it)}>{Icon ? <Icon size={14} /> : `H${it.level}`}</button>;
+  });
 }
 
 // What AI read on the page, next to the handwriting.

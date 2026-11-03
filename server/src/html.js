@@ -1,7 +1,7 @@
 // Page → standalone HTML (export and public read-only links). Ink blocks become inline SVG.
 import * as Y from 'yjs';
 import { strokesOf, canvasImagesSvg } from './docmodel.js';
-import { strokesToSvg } from './ink/render.js';
+import { strokesToSvg, strokesToSvgPages } from './ink/render.js';
 
 const esc = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 const safeUrl = (u) => (/^(https?:|mailto:|\/api\/(assets|public)\/)/i.test(String(u || '')) ? u : '#');
@@ -56,6 +56,7 @@ function block(el, ctx) {
       const h = Number(el.getAttribute('height')) || 240;
       const bg = el.getAttribute('bg');
       const pics = canvasImagesSvg(ctx.doc, el.getAttribute('id'), ctx.asset);
+      if (ctx.print && !bg) return strokes.length || pics.svg ? inkPages(strokes, { height: Math.max(h, pics.bottom), under: pics.svg }) : '';
       const svg = strokes.length || pics.svg ? strokesToSvg(strokes, { height: Math.max(h, pics.bottom), background: '', under: pics.svg }) : '';
       if (bg) return `<figure class="ink photo"><img src="${esc(ctx.asset(safeUrl(bg)))}" alt="">${svg ? `<div class="over">${svg}</div>` : ''}</figure>`;
       return svg ? `<figure class="ink">${svg}</figure>` : '';
@@ -64,22 +65,37 @@ function block(el, ctx) {
   }
 }
 
-export function pageHtml(ydoc, { title, asset = (u) => u } = {}) {
-  const ctx = { doc: ydoc, asset };
+// A4 at 15 mm margins is 180 × 267 mm; the canvas is 1000 units wide, so a page holds about 1480 units of ink.
+const inkPages = (strokes, opts) => strokesToSvgPages(strokes, { pageH: 1440, ...opts }).map((svg) => `<figure class="ink">${svg}</figure>`).join('');
+
+const PRINT_CSS = `@page{size:A4;margin:15mm}body{font:11pt/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;max-width:none;margin:0;padding:0;color:#111;background:#fff}
+h1,h2,h3,h4{break-after:avoid}p,li,pre,blockquote,table,img,.callout,figure{break-inside:avoid}figure.ink{margin:0 0 3mm}figure.ink svg{width:100%;height:auto;display:block}
+img,svg{max-width:100%;height:auto}pre{background:#f6f8fa;padding:10px;border-radius:6px;white-space:pre-wrap}code{font-family:ui-monospace,monospace}
+blockquote{border-left:3px solid #d0d7de;margin:0;padding-left:14px;color:#57606a}table{border-collapse:collapse}td,th{border:1px solid #d0d7de;padding:4px 8px}
+.callout{display:flex;gap:10px;background:#f6f8fa;border-radius:8px;padding:8px 12px}.tasks{list-style:none;padding-left:4px}mark{background:#fef08a}.mention{color:#4f46e5}
+figure.photo{position:relative;margin:0 0 3mm}figure.photo img{width:100%;display:block}figure.photo .over{position:absolute;inset:0}figure.photo .over svg{width:100%;height:auto}`;
+
+/** print: A4 pages for "Save as PDF" — handwriting cut between lines, and the print dialog opens by itself. */
+export function pageHtml(ydoc, { title, asset = (u) => u, print = false } = {}) {
+  const ctx = { doc: ydoc, asset, print };
   const body = kids(ydoc.getXmlFragment('default'), ctx);
   const page = strokesOf(ydoc, 'page');
   const boxes = [...ydoc.getMap('boxes').values()].map((b) => `<p>${esc(b.get?.('text')?.toString() || '')}</p>`).join('');
   const pics = canvasImagesSvg(ydoc, 'page', asset);
-  const journal = page.length || pics.svg ? `<figure class="ink">${strokesToSvg(page, { background: '', height: pics.bottom, under: pics.svg })}</figure>` : '';
+  const journal = !(page.length || pics.svg) ? ''
+    : print ? inkPages(page, { height: pics.bottom, under: pics.svg, firstH: 1300 })
+      : `<figure class="ink">${strokesToSvg(page, { background: '', height: pics.bottom, under: pics.svg })}</figure>`;
   const over = strokesOf(ydoc, 'overlay');
-  const overlay = over.length ? `<figure class="ink"><figcaption>Handwritten on the page</figcaption>${strokesToSvg(over, { background: '' })}</figure>` : '';
+  const overlay = !over.length ? '' : print ? `<h3>Handwritten on the page</h3>${inkPages(over, {})}`
+    : `<figure class="ink"><figcaption>Handwritten on the page</figcaption>${strokesToSvg(over, { background: '' })}</figure>`;
+  const css = print ? PRINT_CSS : SCREEN_CSS;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title || 'Untitled')}</title><style>
-body{font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;max-width:760px;margin:40px auto;padding:0 16px;color:#1f2328;background:#fff}
+<title>${esc(title || 'Untitled')}</title><style>${css}</style>${print ? '<script>addEventListener("load",()=>setTimeout(()=>print(),200))</script>' : ''}</head><body><h1>${esc(title || 'Untitled')}</h1>
+${journal ? `${journal}${boxes}${body}` : `${body}${boxes}`}${overlay}</body></html>`; // a journal's typed text sits below its paper
+}
+
+const SCREEN_CSS = `body{font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;max-width:760px;margin:40px auto;padding:0 16px;color:#1f2328;background:#fff}
 img,svg{max-width:100%;height:auto}pre{background:#f6f8fa;padding:12px;border-radius:6px;overflow:auto}code{font-family:ui-monospace,monospace}
 blockquote{border-left:3px solid #d0d7de;margin:0;padding-left:14px;color:#57606a}table{border-collapse:collapse}td,th{border:1px solid #d0d7de;padding:6px 10px}
 .callout{display:flex;gap:10px;background:#f6f8fa;border-radius:8px;padding:10px 14px}.tasks{list-style:none;padding-left:4px}mark{background:#fef08a}
-.mention{color:#4f46e5}figure.ink{margin:12px 0}figure.photo{position:relative}figure.photo img{width:100%;display:block}figure.photo .over{position:absolute;inset:0}figure.photo .over svg{width:100%;height:auto}@media(prefers-color-scheme:dark){body{background:#0d1117;color:#e6edf3}pre,.callout{background:#161b22}figure.ink{background:#fff;border-radius:8px}}
-</style></head><body><h1>${esc(title || 'Untitled')}</h1>
-${journal ? `${journal}${boxes}${body}` : `${body}${boxes}`}${overlay}</body></html>`; // a journal's typed text sits below its paper
-}
+.mention{color:#4f46e5}figure.ink{margin:12px 0}figure.photo{position:relative}figure.photo img{width:100%;display:block}figure.photo .over{position:absolute;inset:0}figure.photo .over svg{width:100%;height:auto}@media(prefers-color-scheme:dark){body{background:#0d1117;color:#e6edf3}pre,.callout{background:#161b22}figure.ink{background:#fff;border-radius:8px}}`;

@@ -11,7 +11,9 @@ export function mock() {
       const last = messages[messages.length - 1] || {};
       const input = String(last.content || '');
       let text;
-      if (json && /HANDWRITING/.test(system)) {
+      if (json && /HANDWRITTEN LINE/.test(system)) {
+        text = JSON.stringify({ text: 'Handwritten title' });
+      } else if (json && /HANDWRITING/.test(system)) {
         const n = (input.match(/strokes: (\d+)/) || [])[1] || '?';
         text = JSON.stringify({ text: `Handwritten note (${n} strokes)\n- [ ] call Ana about the budget`, todos: ['call Ana about the budget'], dates: [], headings: ['Handwritten note'], drawings: '', language: 'en', confidence: 0.9, images: last.images?.length || 0 });
       } else if (json && /IMAGE/.test(system)) {

@@ -598,3 +598,36 @@ label.check { display: inline-flex; align-items: center; gap: 6px; }
 .journal:focus { outline: none; }
 .typed-below-add { margin-top: 14px; display: inline-flex; align-items: center; gap: 6px; }
 .typed-below { margin-top: 18px; padding: 6px 0 0 32px; border-top: 1px dashed var(--border-strong); }
+
+/* ---------- ink: colour and size pickers, selection, structure marks, handwritten title */
+.ink-pop-wrap { position: relative; display: inline-flex; }
+.ink-pop { position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 40; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 8px; display: grid; gap: 8px; min-width: 200px; }
+.palette-grid { display: grid; grid-template-columns: repeat(6, 28px); gap: 2px; }
+.palette-grid .swatch { padding: 5px !important; }
+.ink-pop label { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--fg-soft); }
+.ink-pop input[type="color"] { width: 40px; height: 28px; padding: 0; border: 0; background: none; }
+.size-pick { display: flex; align-items: center; gap: 8px; }
+.size-pick input[type="range"] { flex: 1; min-width: 130px; }
+.size-preview { width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; }
+.swatch-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--c); display: block; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
+.ink-sel-bar { position: absolute; z-index: 6; display: flex; gap: 2px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); padding: 2px; }
+.ink-sel-bar button { border: 0; background: transparent; padding: 5px 7px; color: var(--danger); }
+.ink-mark { position: absolute; z-index: 4; height: 22px; min-width: 22px; padding: 0 4px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-raised); color: var(--accent); font: 600 11px/1 var(--font); opacity: .55; cursor: pointer; }
+.ink-mark:hover, .ink-mark.todo { opacity: 1; }
+.ink-mark.todo { color: var(--muted); }
+.ink-mark.todo.done { color: #16a34a; }
+.ink-mark.divider { cursor: row-resize; touch-action: none; color: var(--muted); }
+.ink-mark.highlight { color: #ca8a04; }
+.ink-tick { position: absolute; z-index: 3; pointer-events: none; overflow: visible; }
+.ink-tick path { fill: none; stroke: #16a34a; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.ink-title { flex-basis: 100%; position: relative; border: 1px dashed var(--border-strong); border-radius: 10px; background: var(--paper); overflow: hidden; }
+.ink-title-hint { position: absolute; left: 12px; bottom: 6px; font-size: 12px; color: var(--muted); pointer-events: none; }
+.ink-title-close { position: absolute; right: 6px; top: 6px; border: 0; background: transparent; font-size: 18px; line-height: 1; color: var(--muted); }
+.title-pen { align-self: center; opacity: .5; }
+.title-pen:hover { opacity: 1; }
+/* Full-screen paper: no page scrolling under the hand (two fingers move the paper), no buttons to brush against. */
+.note-view[data-canvas-full] .note-scroll { touch-action: none; overscroll-behavior: contain; }
+.note-view[data-canvas-full] .add-paper, .note-view[data-canvas-full] .typed-below, .note-view[data-canvas-full] .typed-below-add { display: none; }
+.tag-bar .chip.suggested .link { color: inherit; }
+.tag-bar .chip.editing { padding: 0 6px; }
+.tag-bar .chip.editing input { width: auto; }

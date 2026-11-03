@@ -190,3 +190,45 @@ test('failed work can be retried, also when the same job failed more than once',
   await drain();
   assert.equal((await ann.get('/api/ai/failed')).length, 0, 'it worked this time');
 });
+
+test('AI tags reuse the spelling of tags already in the space; tags can be renamed everywhere', async () => {
+  const tagged = await ann.post('/api/notes', { spaceId: work(), title: 'Tagged' });
+  await withDoc(tagged.id, (d) => { const a = new Y.Array(); a.push(['meetings', 'ijsplus']); d.getMap('meta').set('tags', a); }, ann.user);
+  const n = await ann.post('/api/notes', { spaceId: work(), title: '', markdown: 'Meeting about the budget for next year, with notes from the meeting.' });
+  await ann.post(`/api/notes/${n.id}/ai/refresh`);
+  await drain();
+  const { insight } = await ann.get(`/api/notes/${n.id}`);
+  assert.ok(insight.tags.includes('meetings') && !insight.tags.includes('meeting'), insight.tags.join());
+
+  const { matchTag } = await import('../src/util/tags.js');
+  assert.deepEqual(['IJS plus', 'ijs-plus', 'IJSplus', 'IJS_Plus', 'other'].map((t) => matchTag(t, ['ijsplus'])), ['ijsplus', 'ijsplus', 'ijsplus', 'ijsplus', 'other']);
+
+  // Renamed on every page, AI suggestions included; '' removes it.
+  assert.equal((await ann.post('/api/tags/rename', { from: 'meetings', to: 'Team meetings', spaceId: work() })).count, 1);
+  const meta = async (id) => { let tags; await withDoc(id, (d) => { tags = d.getMap('meta').get('tags')?.toArray(); }); return tags; };
+  assert.deepEqual(await meta(tagged.id), ['team-meetings', 'ijsplus']);
+  assert.ok((await ann.get(`/api/notes/${n.id}`)).insight.tags.includes('team-meetings'));
+  await ann.post('/api/tags/rename', { from: 'ijsplus', to: '' });
+  assert.deepEqual(await meta(tagged.id), ['team-meetings']);
+});
+
+test('a title written by hand is read on the spot; PDF export cuts handwriting into A4 pages between lines', async () => {
+  const n = await ann.post('/api/notes', { spaceId: work(), kind: 'journal' });
+  const stroke = (y) => ({ t: 'pen', w: 2, c: '#000', p: [20, y, 0.5, 300, y + 20, 0.5, 600, y, 0.5] });
+  assert.equal((await ann.post(`/api/notes/${n.id}/ink/read`, { strokes: [stroke(40)] })).text, 'Handwritten title');
+  assert.equal((await ann.post(`/api/notes/${n.id}/ink/read`, { strokes: [{ p: ['x'] }] })).text, '');
+
+  // Lines of writing every 60 units down to ~4000: three or more pages, none cutting through a line.
+  await withDoc(n.id, (d) => { const a = new Y.Array(); a.push(Array.from({ length: 66 }, (_, i) => ({ id: `s${i}`, ...stroke(30 + i * 60) }))); d.getMap('ink').set('page', a); }, ann.user);
+  const r = await app.inject({ method: 'GET', url: `/api/notes/${n.id}/export?format=pdf`, headers: { cookie: ann.cookie } });
+  assert.equal(r.statusCode, 200);
+  assert.match(r.body, /@page\{size:A4/);
+  assert.match(r.body, /print\(\)/);
+  const views = [...r.body.matchAll(/viewBox="0 (\d+) 1000 (\d+)"/g)].map((m) => [Number(m[1]), Number(m[2])]);
+  assert.ok(views.length >= 3, `${views.length} pages`);
+  for (const [y0, h] of views) {
+    assert.ok(h <= 1440);
+    // A cut is between strokes: no line of writing (y … y+20) spans it.
+    assert.ok(!Array.from({ length: 66 }, (_, i) => 30 + i * 60).some((y) => y - 3 < y0 && y + 23 > y0), `cut at ${y0}`);
+  }
+});

@@ -2,7 +2,7 @@
 // footer (links, backlinks, related pages, unlinked mentions).
 import { useEffect, useRef, useState, useMemo } from 'react';
 import * as Y from 'yjs';
-import { Plus, X, Sparkles, ArrowUpRight, ArrowDownLeft, Link2, Network, Quote, Pin } from 'lucide-react';
+import { Plus, X, Pencil, Sparkles, ArrowUpRight, ArrowDownLeft, Link2, Network, Quote, Pin } from 'lucide-react';
 import { get, post } from './api.js';
 import { store, useStore, navigate, toast, toastError } from './store.js';
 import { onEvent } from './data.js';
@@ -10,6 +10,7 @@ import { useYObserve } from './ui/ytext.js';
 import { InkCanvas } from './ink/InkCanvas.jsx';
 import { InkToolbar, setInkTool } from './ink/InkToolbar.jsx';
 import { pickAnchor, anchorShift } from './ink/anchor.js';
+import { matchTag, cleanTag } from './tags.js';
 
 // ---------------------------------------------------------------- tags
 
@@ -18,46 +19,91 @@ export function TagBar({ detail, doc, readOnly }) {
   useYObserve(meta);
   const arr = meta.get('tags');
   useYObserve(arr instanceof Y.Array ? arr : null);
+  const hiddenArr = meta.get('tagsHidden');
+  useYObserve(hiddenArr instanceof Y.Array ? hiddenArr : null);
   const manual = arr instanceof Y.Array ? arr.toArray() : [];
+  const hidden = hiddenArr instanceof Y.Array ? hiddenArr.toArray() : [];
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [value, setValue] = useState('');
   const [known, setKnown] = useState([]);
-  useEffect(() => { if (adding) get(`/api/tags?space=${detail.spaceId}`).then((t) => setKnown(t.map((x) => x.tag))).catch(() => {}); }, [adding, detail.spaceId]);
+  const loadKnown = () => get(`/api/tags?space=${detail.spaceId}`).then(setKnown).catch(() => {});
+  useEffect(() => { if (!readOnly) loadKnown(); }, [detail.spaceId, readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+  const knownTags = known.map((x) => x.tag);
   const hashtags = (detail.tags || []).filter((t) => !manual.includes(t));
-  const suggested = (detail.insight?.tags || []).filter((t) => !manual.includes(t) && !hashtags.includes(t));
+  const has = (t) => manual.includes(t) || hashtags.includes(t);
+  // AI's ideas, spelled like the tags already in use ("IJS plus" is the existing "ijsplus"); dismissed ones stay away.
+  const suggested = [...new Set((detail.insight?.tags || []).map((t) => matchTag(t, knownTags)))].filter((t) => t && !has(t) && !hidden.includes(t));
 
-  const add = (raw) => {
-    const t = String(raw).toLowerCase().replace(/^#/, '').trim().replace(/\s+/g, '-').slice(0, 40);
-    if (!t || manual.includes(t)) return;
-    doc.transact(() => {
-      let a = meta.get('tags');
-      if (!(a instanceof Y.Array)) { a = new Y.Array(); meta.set('tags', a); }
-      a.push([t]);
-    });
+  const tagsArr = () => {
+    let a = meta.get('tags');
+    if (!(a instanceof Y.Array)) { a = new Y.Array(); meta.set('tags', a); }
+    return a;
   };
-  const remove = (t) => {
+  const add = (raw) => {
+    const t = matchTag(raw, knownTags);
+    if (!t || manual.includes(t)) return;
+    doc.transact(() => tagsArr().push([t]));
+  };
+  // Dismissed AI suggestions, and tags removed or renamed here, are not suggested again.
+  const dismiss = (t) => doc.transact(() => {
+    let a = meta.get('tagsHidden');
+    if (!(a instanceof Y.Array)) { a = new Y.Array(); meta.set('tagsHidden', a); }
+    if (!a.toArray().includes(t)) a.push([t]);
+  });
+  const remove = (t) => doc.transact(() => {
     const a = meta.get('tags');
     const i = a?.toArray().indexOf(t);
     if (i >= 0) a.delete(i, 1);
+    dismiss(t);
+  });
+  const rename = async (from, raw) => {
+    setEditing(null);
+    const to = cleanTag(raw);
+    if (!to || to === from) return;
+    const others = (known.find((x) => x.tag === from)?.count || 1) - 1;
+    if (others > 0 && window.confirm(`Rename #${from} to #${to} on all ${others + 1} pages that have it?`)) {
+      try { const { count } = await post('/api/tags/rename', { from, to, spaceId: detail.spaceId }); toast(`Renamed on ${count} page${count === 1 ? '' : 's'}`); loadKnown(); } catch (e) { toastError(e); }
+      return;
+    }
+    doc.transact(() => {
+      const a = tagsArr();
+      const i = a.toArray().indexOf(from);
+      if (i >= 0) a.delete(i, 1);
+      if (!a.toArray().includes(to)) a.insert(Math.max(0, i), [to]);
+      dismiss(from);
+    });
   };
   const search = (t) => navigate(`#/search?q=${encodeURIComponent(`tag:${t}`)}`);
   if (readOnly && !manual.length && !hashtags.length) return null;
+  const input = (initial, done) => (
+    <input autoFocus list="known-tags" defaultValue={initial} placeholder="tag name" size={Math.max(8, initial.length + 2)}
+      onKeyDown={(e) => {
+        const el = e.currentTarget;
+        // Renaming finishes on blur only (so it happens once); adding keeps the field open for the next tag.
+        if (e.key === 'Enter' && initial) { e.preventDefault(); el.blur(); }
+        else if ((e.key === 'Enter' || e.key === ',') && !initial) { e.preventDefault(); done(el.value, true); el.value = ''; }
+        if (e.key === 'Escape') { el.value = initial; el.blur(); }
+      }}
+      onBlur={(e) => done(e.currentTarget.value, false)} />
+  );
   return (
     <div className="tag-bar">
-      {manual.map((t) => (
-        <span key={t} className="chip manual"><button className="link" onClick={() => search(t)}>#{t}</button>
-          {!readOnly && <button className="link x" onClick={() => remove(t)} aria-label={`Remove tag ${t}`}><X size={11} /></button>}</span>
+      {manual.map((t) => (editing === t
+        ? <span key={t} className="chip manual editing">#{input(t, (v) => rename(t, v))}</span>
+        : <span key={t} className="chip manual"><button className="link" onClick={() => search(t)} title="Pages with this tag">#{t}</button>
+          {!readOnly && <button className="link x" onClick={() => setEditing(t)} title="Rename" aria-label={`Rename tag ${t}`}><Pencil size={10} /></button>}
+          {!readOnly && <button className="link x" onClick={() => remove(t)} title="Remove" aria-label={`Remove tag ${t}`}><X size={11} /></button>}</span>
       ))}
-      {hashtags.map((t) => <button key={t} className="chip" title="From a #tag in the text" onClick={() => search(t)}>#{t}</button>)}
-      {!readOnly && suggested.map((t) => <button key={t} className="chip suggested" title="Suggested by AI — click to add" onClick={() => add(t)}><Sparkles size={11} /> {t}</button>)}
-      {!readOnly && (adding ? (
-        <>
-          <input autoFocus list="known-tags" value={value} placeholder="tag name" onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add(value); setValue(''); } if (e.key === 'Escape') setAdding(false); }}
-            onBlur={() => { if (value) add(value); setValue(''); setAdding(false); }} />
-          <datalist id="known-tags">{known.filter((t) => !manual.includes(t)).map((t) => <option key={t} value={t} />)}</datalist>
-        </>
-      ) : <button className="chip" onClick={() => setAdding(true)}><Plus size={11} /> Tag</button>)}
+      {hashtags.map((t) => <button key={t} className="chip" title="From a #tag in the text (edit the text to change it)" onClick={() => search(t)}>#{t}</button>)}
+      {!readOnly && suggested.map((t) => (
+        <span key={t} className="chip suggested"><button className="link" title="Suggested by AI — add it" onClick={() => add(t)}><Sparkles size={11} /> {t}</button>
+          <button className="link x" title="Not this one" aria-label={`Dismiss suggested tag ${t}`} onClick={() => dismiss(t)}><X size={11} /></button></span>
+      ))}
+      {!readOnly && (adding
+        ? <span className="chip editing">{input('', (v, keep) => { if (v) add(v); if (!keep) setAdding(false); })}</span>
+        : <button className="chip" onClick={() => setAdding(true)}><Plus size={11} /> Tag</button>)}
+      {!readOnly && (adding || editing) && <datalist id="known-tags">{knownTags.filter((t) => !manual.includes(t)).map((t) => <option key={t} value={t} />)}</datalist>}
     </div>
   );
 }

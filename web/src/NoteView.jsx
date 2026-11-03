@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2, MoveHorizontal, MessagesSquare, FileCode2, Camera, Smartphone, Image as ImageIcon, Type } from 'lucide-react';
+import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2, MoveHorizontal, MessagesSquare, FileCode2, Camera, Smartphone, Image as ImageIcon, Type, FileDown } from 'lucide-react';
 import { toggleFullscreen, toggleCanvasFullscreen, pageCanvas } from './ui/fullscreen.js';
 import { get, post, put, patch, del } from './api.js';
 import { store, useStore, findNote, openNote, navigate, toast, toastError, localSet } from './store.js';
@@ -9,6 +9,7 @@ import { MarkdownSource } from './editor/MarkdownSource.jsx';
 import { photoTo, requestPhoto, touchDevice, useActivePage } from './capture.js';
 import { useNarrow } from './QuickActions.jsx';
 import { JournalView } from './ink/JournalView.jsx';
+import { InkTitle } from './ink/InkTitle.jsx';
 import { leavePage, emptyBody, isFresh } from './fresh.js';
 import { useYText } from './ui/ytext.js';
 import { Menu } from './ui/Menu.jsx';
@@ -174,6 +175,7 @@ function NoteHeader({ detail, setDetail, handle, readOnly, wide }) {
     { label: 'Move to space…', icon: FolderInput, hidden: readOnly, submenu: spaces.filter((s) => s.id !== detail.spaceId && ['owner', 'editor'].includes(s.role)).map((s) => ({ label: `${s.icon} ${s.name}`, onClick: () => moveToSpace(detail.id, s).then((moved) => { if (moved) store.set({ spaceId: s.id }); }).catch(toastError) })) },
     { label: 'Export as Markdown', icon: Download, onClick: () => { location.href = `/api/notes/${detail.id}/export`; } },
     { label: 'Export as HTML', icon: Download, onClick: () => { location.href = `/api/notes/${detail.id}/export?format=html`; } },
+    { label: 'Export as PDF', icon: FileDown, onClick: () => exportPdf(detail.id) },
     { label: detail.publicSlug ? 'Public link…' : 'Share public link…', icon: Globe, hidden: readOnly, onClick: async () => {
       const { slug } = await post(`/api/notes/${detail.id}/publish`);
       setDetail((d) => ({ ...d, publicSlug: slug }));
@@ -222,9 +224,26 @@ function NoteHeader({ detail, setDetail, handle, readOnly, wide }) {
   );
 }
 
+// A print-ready page (A4, handwriting cut between lines) and the browser's print dialog, where "Save as PDF" is.
+// Phones print what is on screen, so there it opens in its own tab.
+function exportPdf(id) {
+  const url = `/api/notes/${id}/export?format=pdf`;
+  if (touchDevice()) { window.open(url, '_blank'); return; }
+  document.getElementById('print-frame')?.remove();
+  const f = document.createElement('iframe');
+  f.id = 'print-frame';
+  f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  f.src = url;
+  document.body.appendChild(f);
+  toast('Preparing the PDF…');
+}
+
 function TitleRow({ detail, setDetail, doc, readOnly }) {
   const [title, setTitle] = useYText(doc.getText('title'));
   const [picker, setPicker] = useState(false);
+  // Handwritten pages: the title can be written by hand too (shown while there is none, or on request).
+  const [penTitle, setPenTitle] = useState(false);
+  const inkTitle = detail.kind === 'journal' && !readOnly && (penTitle || !title.trim());
   const ref = useRef(null);
   useEffect(() => { if (ref.current) { ref.current.style.height = 'auto'; ref.current.style.height = `${ref.current.scrollHeight}px`; } }, [title]);
   const setIcon = async (icon) => { setPicker(false); setDetail((d) => ({ ...d, icon })); await patch(`/api/notes/${detail.id}`, { icon }).catch(toastError); };
@@ -239,6 +258,8 @@ function TitleRow({ detail, setDetail, doc, readOnly }) {
         onChange={(e) => setTitle(e.target.value.replace(/\n/g, ' '))}
         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); document.querySelector('.prose')?.focus(); } if (e.key === 'Tab' && suggestion) { e.preventDefault(); setTitle(suggestion); } }} />
       {suggestion && !readOnly && <button className="chip" onClick={() => setTitle(suggestion)} title="AI suggestion — Tab"><Sparkles size={12} /> Use “{suggestion}”</button>}
+      {detail.kind === 'journal' && !readOnly && !inkTitle && <button className="icon title-pen" onClick={() => setPenTitle(true)} title="Write the title by hand" aria-label="Write the title by hand"><PenLine size={16} /></button>}
+      {inkTitle && <InkTitle noteId={detail.id} onText={(t) => { setTitle(t); setPenTitle(false); }} onClose={penTitle ? () => setPenTitle(false) : null} />}
     </div>
   );
 }

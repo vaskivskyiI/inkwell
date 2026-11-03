@@ -1,17 +1,21 @@
 // A handwriting surface bound to a Y.Array of strokes (doc.ink[canvasId]). Logical width 1000 units, scaled to the
 // element's width, so ink lands in the same place on every device. Pen, highlighter, eraser (whole strokes or
 // partial, also the pen's eraser button), lasso select/move, shape correction (Shapes mode, or hold the pen still at
-// the end of a stroke), pinch / Ctrl+wheel zoom. Touch scrolls instead of drawing once a pen has been used.
+// the end of a stroke), pinch / Ctrl+wheel zoom. Touch scrolls instead of drawing once a pen has been used; a palm
+// next to the pen is ignored, and in full screen only two fingers move the paper.
 import { useEffect, useLayoutEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
+import { Trash2 } from 'lucide-react';
 import * as Y from 'yjs';
 import { CANVAS_WIDTH, TOOLS, outline, path2d, hits, strokeInLasso, bounds, sid } from './geometry.js';
 import { recognize, eraseFromStroke } from './shapes.js';
 import { keepKeyboardAway } from './keyboard.js';
 import { CanvasImages, LOCAL, shiftImages } from './CanvasImages.jsx';
 import { useStore, store } from '../store.js';
+import { toolSize, toolColor } from './tools.js';
 
 const MAX_ZOOM = 3;
 let penSeen = false;
+let penAt = 0; // last time the pen touched or hovered: touches right after are the hand resting on the screen
 export const penOnlyActive = () => {
   const mode = store.get().settings?.penOnly || 'auto';
   return mode === 'on' || (mode === 'auto' && penSeen);
@@ -25,16 +29,19 @@ const scrollParent = (el) => {
   return document.scrollingElement;
 };
 
+const inFullscreen = (el) => { try { return !!el?.closest('[data-canvas-full], .fs-fallback, :fullscreen'); } catch { return !!el?.closest('[data-canvas-full], .fs-fallback'); } };
+
 // offsetOf(stroke) → vertical shift in logical units (ink anchored to text that moved); anchorFor(stroke) → anchor
 // stored on new strokes; redrawKey: changes when offsets may have changed.
-export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, onHeightChange, autoGrow = false, minHeight = 200, readOnly = false, paper = 'plain', background, onTap, children, onStrokesChange, zoomable = true, offsetOf, anchorFor, redrawKey, spaceable = true, onSpace, images = false }, ref) {
+export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, onHeightChange, autoGrow = false, minHeight = 200, readOnly = false, paper = 'plain', background, onTap, children, onStrokesChange, zoomable = true, offsetOf, anchorFor, redrawKey, spaceable = true, onSpace, images = false, toolOverride }, ref) {
   const offOf = (s) => (s.a && offsetOf ? offsetOf(s) || 0 : 0);
   // The stroke where it is shown (points shifted by its offset), for hit tests and selection.
   const shown = (s) => { const o = offOf(s); return o ? { ...s, p: s.p.map((v, i) => (i % 3 === 1 ? v + o : v)) } : s; };
   const wrap = useRef(null), base = useRef(null), live = useRef(null);
   const [width, setWidth] = useState(0);
   const [zoom, setZoom] = useState(1);
-  const tool = useStore((s) => s.inkTool);
+  const stored = useStore((s) => s.inkTool);
+  const tool = toolOverride ? { ...stored, ...toolOverride } : stored;
   const strokes = useRef([]);
   const paths = useRef(new Map());
   const yarr = useRef(null);
@@ -46,7 +53,10 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
   useImperativeHandle(ref, () => ({
     undo: () => undo.current?.undo(), redo: () => undo.current?.redo(),
     canUndo: () => !!undo.current?.undoStack.length, canRedo: () => !!undo.current?.redoStack.length,
-    clearSelection, deleteSelection, strokes: () => strokes.current, clear: () => { const a = yarr.current; if (a?.length) doc.transact(() => a.delete(0, a.length), LOCAL); },
+    clearSelection, deleteSelection, strokes: () => strokes.current,
+    select: (ids) => { sel.current = { ids: new Set(ids), box: null }; schedule(); force((x) => x + 1); wrap.current?.focus({ preventScroll: true }); },
+    // Insert / close space from a handle outside the canvas (a divider's grip): the drag continues here.
+    startSpace: (e, y) => { if (readOnly) return; e.preventDefault(); live.current.setPointerCapture(e.pointerId); beginSpace(y, e); }, clear: () => { const a = yarr.current; if (a?.length) doc.transact(() => a.delete(0, a.length), LOCAL); },
     // Where a new picture goes: the middle of what is on screen, in canvas units.
     viewCenter: () => { const r = live.current.getBoundingClientRect(); return { x: (Math.min(r.right, window.innerWidth) / 2 + Math.max(r.left, 0) / 2 - r.left) / scale, y: ((Math.max(r.top, 0) + Math.min(r.bottom, window.innerHeight)) / 2 - r.top) / scale }; },
     zoomIn: () => zoomTo(zoom * 1.25), zoomOut: () => zoomTo(zoom / 1.25), zoomReset: () => zoomTo(1), zoom: () => zoom,
@@ -216,49 +226,64 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
   function startPinch() {
     const [a, b] = [...touches.current.values()];
     if (g.current?.hold) clearTimeout(g.current.hold);
-    g.current = { kind: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: zoom };
+    g.current = { kind: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: zoom, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, el: scrollParent(wrap.current) };
     clearLive();
   }
 
+  function beginSpace(y, e) {
+    // Everything lower down moves; dragging up only closes empty space.
+    const below = strokes.current.filter((s) => middleY(shown(s)) >= y);
+    const top = bounds(below.map(shown))?.minY ?? Infinity;
+    g.current = { kind: 'space', y0: y, dy: 0, ids: new Set(below.map((s) => s.id)), minDy: top === Infinity ? 0 : y - top, pid: e.pointerId, type: e.pointerType };
+    drawLive();
+  }
+
+  const selBox = () => (sel.current.ids.size ? bounds(strokes.current.filter((s) => sel.current.ids.has(s.id)).map(shown)) : null);
+  const inSel = (p) => { const b = selBox(); return !!b && p[0] > b.minX - 14 && p[0] < b.maxX + 14 && p[1] > b.minY - 14 && p[1] < b.maxY + 14; };
+
   function onDown(e) {
-    if (e.pointerType === 'pen') penSeen = true;
+    if (e.pointerType === 'pen') { penSeen = true; penAt = Date.now(); }
     keepKeyboardAway();
+    const own = { pid: e.pointerId, type: e.pointerType };
     if (e.pointerType === 'touch') {
       touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (zoomable && touches.current.size === 2) { e.preventDefault(); startPinch(); return; }
+      // The hand resting on the screen while the pen writes or hovers: not a gesture.
+      if ((g.current && g.current.type !== 'touch') || Date.now() - penAt < 700) { e.preventDefault(); return; }
+      // Two fingers move the paper (and zoom it).
+      if (touches.current.size === 2) { e.preventDefault(); startPinch(); return; }
     }
     if (readOnly) {
-      if (e.pointerType === 'touch') g.current = { kind: 'scroll', y: e.clientY, x: e.clientX, el: scrollParent(wrap.current) };
-      return;
-    }
-    if (e.pointerType === 'touch' && penOnlyActive()) {
-      g.current = { kind: 'scroll', y: e.clientY, x: e.clientX, el: scrollParent(wrap.current) };
+      if (e.pointerType === 'touch') g.current = { kind: 'scroll', y: e.clientY, x: e.clientX, el: scrollParent(wrap.current), ...own };
       return;
     }
     if (e.button === 2) return;
+    const p = pt(e);
+    const eraser = e.button === 5 || (e.buttons & 32) || tool.tool === 'eraser';
+    // A selection moves with the pen, the mouse or a finger; a tap anywhere else lets it go.
+    if (sel.current.ids.size && !eraser) {
+      if (inSel(p)) {
+        e.preventDefault();
+        live.current.setPointerCapture(e.pointerId);
+        g.current = { kind: 'move', from: p, dx: 0, dy: 0, ...own };
+        return;
+      }
+      clearSelection();
+      if (e.pointerType === 'touch') { e.preventDefault(); g.current = { kind: 'idle', ...own }; return; }
+    }
+    if (e.pointerType === 'touch' && penOnlyActive()) {
+      // In full screen one finger does nothing (it is usually the palm); elsewhere it scrolls.
+      g.current = inFullscreen(wrap.current) ? { kind: 'idle', ...own } : { kind: 'scroll', y: e.clientY, x: e.clientX, el: scrollParent(wrap.current), ...own };
+      return;
+    }
     e.preventDefault();
     wrap.current?.focus({ preventScroll: true }); // keys (undo, tools) work here, and no text has focus
     live.current.setPointerCapture(e.pointerId);
-    const p = pt(e);
-    const eraser = e.button === 5 || (e.buttons & 32) || tool.tool === 'eraser';
-    if (tool.tool === 'text' && onTap) { g.current = { kind: 'tap', p }; return; }
-    if (eraser) { g.current = { kind: 'erase' }; erase(p); return; }
-    if (tool.tool === 'space' && spaceable) {
-      // Everything lower down moves; dragging up only closes empty space.
-      const below = strokes.current.filter((s) => middleY(s) >= p[1]);
-      const top = bounds(below)?.minY ?? Infinity;
-      g.current = { kind: 'space', y0: p[1], dy: 0, ids: new Set(below.map((s) => s.id)), minDy: top === Infinity ? 0 : p[1] - top };
-      drawLive();
-      return;
-    }
-    if (tool.tool === 'lasso') {
-      const b = sel.current.box;
-      if (b && sel.current.ids.size && p[0] > b.minX - 8 && p[0] < b.maxX + 8 && p[1] > b.minY - 8 && p[1] < b.maxY + 8) g.current = { kind: 'move', from: p, dx: 0, dy: 0 };
-      else { clearSelection(); g.current = { kind: 'lasso', poly: [[p[0], p[1]]] }; }
-      return;
-    }
-    clearSelection();
-    g.current = { kind: 'draw', stroke: { id: sid(), t: tool.tool === 'hl' ? 'hl' : 'pen', c: tool.tool === 'hl' ? hlColor(tool.color) : tool.color, w: tool.tool === 'hl' ? tool.width * 5 : tool.width, p: [...p] } };
+    if (tool.tool === 'text' && onTap) { g.current = { kind: 'tap', p, ...own }; return; }
+    if (eraser) { g.current = { kind: 'erase', ...own }; erase(p); return; }
+    if (tool.tool === 'space' && spaceable) { beginSpace(p[1], e); return; }
+    if (tool.tool === 'lasso') { g.current = { kind: 'lasso', poly: [[p[0], p[1]]], ...own }; return; }
+    const kind = tool.tool === 'hl' ? 'hl' : 'pen';
+    g.current = { kind: 'draw', stroke: { id: sid(), t: kind, c: toolColor(tool, kind), w: toolSize(tool, kind), p: [...p] }, ...own };
     armHold();
     drawLive();
   }
@@ -275,15 +300,22 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
   }
 
   function onMove(e) {
+    if (e.pointerType === 'pen') penAt = Date.now(); // hovering counts: the palm comes down before the pen does
     if (e.pointerType === 'touch' && touches.current.has(e.pointerId)) touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const gs = g.current;
     if (!gs) return;
     if (gs.kind === 'pinch') {
       const [a, b] = [...touches.current.values()];
       if (!a || !b) return;
-      zoomTo(gs.z0 * (Math.hypot(a.x - b.x, a.y - b.y) / gs.d0), (a.x + b.x) / 2, (a.y + b.y) / 2);
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      gs.el?.scrollBy(0, gs.my - my);
+      wrap.current.scrollLeft += gs.mx - mx;
+      gs.mx = mx; gs.my = my;
+      if (zoomable) zoomTo(gs.z0 * (Math.hypot(a.x - b.x, a.y - b.y) / gs.d0), mx, my);
       return;
     }
+    // Only the pointer that started the gesture moves it (not a palm or a second finger).
+    if (e.pointerId !== gs.pid || gs.kind === 'idle') return;
     if (gs.kind === 'scroll') { gs.el.scrollBy(0, gs.y - e.clientY); wrap.current.scrollLeft += gs.x - e.clientX; gs.x = e.clientX; gs.y = e.clientY; return; }
     const events = e.getCoalescedEvents?.() || [e];
     if (gs.kind === 'draw') {
@@ -291,6 +323,12 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
       const p0 = gs.stroke.p;
       for (const ev of events) gs.stroke.p.push(...pt(ev));
       const n = p0.length;
+      // Near the bottom: more paper before the pen gets there.
+      const y = p0[n - 2];
+      if (onHeightChange) {
+        const need = autoGrow ? (y > h - 350 ? Math.ceil((y + 1000) / 100) * 100 : 0) : (y > h - 30 ? Math.ceil((y + 80) / 20) * 20 : 0);
+        if (need > h) onHeightChange(need);
+      }
       if (n > 6 && Math.hypot(p0[n - 3] - p0[n - 6], p0[n - 2] - p0[n - 5]) > 1.5 / Math.max(scale, 0.3)) armHold();
       drawLive();
     } else if (gs.kind === 'erase') for (const ev of events) erase(pt(ev));
@@ -301,16 +339,19 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
 
   function onUp(e) {
     if (e?.pointerType === 'touch') touches.current.delete(e.pointerId);
+    if (e?.pointerType === 'pen') penAt = Date.now();
     const gs = g.current;
     if (gs?.kind === 'pinch') { if (touches.current.size < 2) g.current = null; return; }
+    if (!gs || (e && e.pointerId !== gs.pid)) return;
     g.current = null;
-    if (!gs) return;
     clearTimeout(gs.hold);
     clearLive();
     if (gs.kind === 'draw') {
       const s = gs.stroke;
       // Shapes mode: larger strokes are straightened or smoothed when lifted (handwriting is left alone).
       if (!gs.snapped && tool.shapes && s.t === 'pen') { const r = shapeOf(s, { minSize: 60 }); if (r) s.p = r.p; }
+      // A long horizontal line is a divider: always straightened.
+      else if (!gs.snapped && s.t === 'pen') { const d = dividerOf(s); if (d) s.p = d; }
       s.p = s.p.map((v, i) => (i % 3 === 2 ? Math.round(v * 100) / 100 : Math.round(v * 10) / 10));
       const a = ensureArray();
       const anchor = anchorFor?.(s);
@@ -355,7 +396,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
         a.push(moved);
       }, LOCAL);
       sel.current = { ids: new Set(moved.map((s) => s.id)), box: null };
-      schedule();
+      schedule(); force((x) => x + 1);
     }
   }
 
@@ -429,6 +470,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
 
   const cursor = readOnly ? 'default' : tool.tool === 'space' && spaceable ? 'row-resize' : tool.tool === 'eraser' ? 'cell' : tool.tool === 'lasso' ? 'crosshair' : tool.tool === 'text' ? 'text' : 'crosshair';
   const W = width * zoom, H = h * scale;
+  const sb = !readOnly && !g.current && selBox();
   return (
     <div ref={wrap} className={`ink-canvas${zoom > 1 ? ' zoomed' : ''}`} style={{ height: H }} tabIndex={readOnly ? -1 : 0} onKeyDown={onKey}>
       <div className="ink-inner" style={{ width: W || '100%', height: H, ...bg }}>
@@ -438,6 +480,9 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
         <canvas ref={live} className="ink-live" style={{ width: W, height: H, cursor, touchAction: 'none', pointerEvents: tool.tool === 'pick' && images ? 'none' : undefined }}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onContextMenu={(e) => e.preventDefault()} />
         {children?.(scale)}
+        {sb && <div className="ink-sel-bar" style={{ left: Math.max(0, Math.min(sb.maxX * scale - 36, W - 40)), top: Math.max(0, sb.minY * scale - 42) }}>
+          <button title="Delete the selection" aria-label="Delete the selection" onPointerDown={(e) => e.preventDefault()} onClick={deleteSelection}><Trash2 size={15} /></button>
+        </div>}
       </div>
       {zoom > 1 && <button className="zoom-badge" onClick={() => zoomTo(1)} title="Back to 100% (Ctrl+0)">{Math.round(zoom * 100)}%</button>}
     </div>
@@ -457,5 +502,15 @@ function shapeOf(stroke, { minSize }) {
   return { kind: r.kind, p: r.points.flatMap(([x, y], i) => [x, y, press(i)]) };
 }
 
+// A pen stroke drawn as a long, nearly level line → its points as an exactly level line, or null.
+function dividerOf(stroke) {
+  const r = shapeOf(stroke, { minSize: 250 });
+  if (r?.kind !== 'line') return null;
+  const xs = r.p.filter((_, i) => i % 3 === 0), ys = r.p.filter((_, i) => i % 3 === 1);
+  const dx = Math.max(...xs) - Math.min(...xs), dy = Math.max(...ys) - Math.min(...ys);
+  if (dx < 250 || dy > 0.08 * dx) return null;
+  const y = ys.reduce((a, b) => a + b, 0) / ys.length;
+  return r.p.map((v, i) => (i % 3 === 1 ? y : v));
+}
+
 const middleY = (s) => { const b = bounds([{ ...s, w: 0 }]); return b ? (b.minY + b.maxY) / 2 : 0; };
-const hlColor = (c) => (/^#(1f2937|000000|111827)$/i.test(c) ? '#facc15' : c);

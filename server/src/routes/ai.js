@@ -4,9 +4,10 @@ import { encrypt } from '../util/crypto.js';
 import { needNote } from '../spaces.js';
 import { getSettings, saveSettings, getServerSetting, setServerSetting } from '../settings.js';
 import { PROVIDER_TYPES, makeProvider } from '../ai/providers/index.js';
-import { availableProviders, resolve, forgetProvider } from '../ai/router.js';
+import { availableProviders, resolve, forgetProvider, askJson } from '../ai/router.js';
 import { MODEL_ADVICE, describeModels } from '../ai/models.js';
-import { INLINE_ACTIONS, inlineSystem, reviewSystem } from '../ai/prompts.js';
+import { INLINE_ACTIONS, inlineSystem, reviewSystem, inkLinePrompt } from '../ai/prompts.js';
+import { strokesToPng } from '../ink/render.js';
 import { enqueue, kick } from '../ai/queue.js';
 import { resumeWaiting, reanalyseAll } from '../ai/tasks.js';
 import { ask } from '../ai/assistant.js';
@@ -199,6 +200,20 @@ export default async function aiRoutes(app) {
     await q('UPDATE ink_recognitions SET strokes_hash = $3 WHERE note_id = $1 AND canvas_id = $2', n.id, str(req.params.canvasId, 80), '');
     await enqueue(req.user.id, 'ink', `${n.id}:${str(req.params.canvasId, 80)}`, { priority: 0 });
     return { ok: true };
+  });
+
+  // A few strokes read on the spot (a title written by hand). They come from the browser and are not kept.
+  app.post('/api/notes/:id/ink/read', async (req) => {
+    const n = await needNote(req.user.id, req.params.id, 'editor');
+    const strokes = (Array.isArray(req.body?.strokes) ? req.body.strokes : []).slice(0, 400)
+      .filter((s) => Array.isArray(s?.p) && s.p.length >= 3 && s.p.length <= 30000 && s.p.every(Number.isFinite))
+      .map((s) => ({ t: 'pen', w: Math.min(40, Number(s.w) || 3), c: '#111827', p: s.p }));
+    if (!strokes.length) return { text: '' };
+    const r = await resolve(req.user.id, 'vision', { spaceId: n.space_id });
+    if (!r) fail(409, 'Reading handwriting needs a vision model (Settings → AI)');
+    const { png } = await strokesToPng(strokes, { maxSide: 1200 });
+    const out = await askJson(r, { system: inkLinePrompt(), user: 'Read the title.', images: [{ mime: 'image/png', data: Buffer.from(png).toString('base64') }], maxTokens: 200, fallback: (text) => ({ text }) });
+    return { text: String(out.text || '').replace(/\s+/g, ' ').replace(/^["“']|["”']$/g, '').trim().slice(0, 200) };
   });
 
   app.get('/api/notes/:id/related', async (req) => {

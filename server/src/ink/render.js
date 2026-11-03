@@ -22,6 +22,31 @@ export function strokesToSvg(strokes, { crop = false, height, background = '#fff
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x0.toFixed(0)} ${y0.toFixed(0)} ${w.toFixed(0)} ${h.toFixed(0)}" width="${w.toFixed(0)}" height="${h.toFixed(0)}">${bg}${under}${paths}</svg>`;
 }
 
+/**
+ * The canvas cut into page-sized SVGs for print: each at most pageH units tall (the first firstH), cut where no
+ * stroke crosses when there is such a place in the lower part of the page, so lines of writing stay whole.
+ */
+export function strokesToSvgPages(strokes, { height = 0, under = '', pageH = 1440, firstH = pageH } = {}) {
+  const b = bounds(strokes);
+  const total = Math.max(height || 0, b ? b.maxY + 16 : 0);
+  if (!total) return [];
+  const spans = strokes.map((s) => bounds([s]));
+  const free = (y) => !spans.some((x) => x && x.minY - 4 < y && x.maxY + 4 > y);
+  const pages = [];
+  for (let y0 = 0, lim = firstH; y0 < total - 1; lim = pageH) {
+    let y1 = Math.min(total, y0 + lim);
+    if (y1 < total) for (let y = y1; y > y0 + lim * 0.55; y -= 4) if (free(y)) { y1 = y; break; }
+    const h = y1 - y0;
+    const paths = strokes.filter((s, i) => spans[i] && spans[i].maxY > y0 && spans[i].minY < y1).map((s) => {
+      const tool = TOOLS[s.t] || TOOLS.pen;
+      return `<path d="${pathOf(outline(s))}" fill="${esc(color(s.c))}"${tool.opacity < 1 ? ` fill-opacity="${tool.opacity}"` : ''}/>`;
+    }).join('');
+    pages.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 ${y0.toFixed(0)} ${CANVAS_WIDTH} ${h.toFixed(0)}" width="${CANVAS_WIDTH}" height="${h.toFixed(0)}">${under}${paths}</svg>`);
+    y0 = y1;
+  }
+  return pages;
+}
+
 let Resvg = null;
 /** PNG for vision models: cropped to the ink, scaled so the longer side is at most maxSide pixels. */
 export async function strokesToPng(strokes, { maxSide = 1600 } = {}) {

@@ -11,6 +11,8 @@ import { readAsset } from '../assets.js';
 import { getSettings } from '../settings.js';
 import { publish } from '../events.js';
 import { logger } from '../util/log.js';
+import { matchTag } from '../util/tags.js';
+import { tagList } from '../search.js';
 
 const log = logger('ai');
 const NO_PROVIDER = { retryIn: 3600 }; // picked up again sooner when a provider is added (resumeWaiting)
@@ -41,11 +43,13 @@ registerHandler('analyze', async (job) => {
   if (info.markdown.replace(/\s+/g, ' ').trim().length < 40) { await save({}); return; }
   const r = await resolve(job.user_id, 'chat', { spaceId: n.space_id });
   if (!r) return NO_PROVIDER;
-  const out = await askJson(r, { system: analyzePrompt(settings), user: `TITLE: ${info.title || '(untitled)'}\n${info.markdown.slice(0, 24000)}` });
+  // Tags already in use in the space: the model is asked to reuse them, and what it suggests is matched to them.
+  const known = (await tagList(job.user_id, n.space_id)).map((t) => t.tag);
+  const out = await askJson(r, { system: analyzePrompt(settings, known.slice(0, 150)), user: `TITLE: ${info.title || '(untitled)'}\n${info.markdown.slice(0, 24000)}` });
   const insight = {
     title: String(out.title || '').slice(0, 120),
     summary: String(out.summary || '').slice(0, 1200),
-    tags: (Array.isArray(out.tags) ? out.tags : []).map((t) => String(t).toLowerCase().replace(/^#/, '').trim()).filter(Boolean).slice(0, 6),
+    tags: [...new Set((Array.isArray(out.tags) ? out.tags : []).map((t) => matchTag(t, known)).filter(Boolean))].slice(0, 6),
     actions: (Array.isArray(out.actions) ? out.actions : []).map((a) => ({ text: String(a?.text || a || '').slice(0, 300), due: /^\d{4}-\d{2}-\d{2}/.test(a?.due || '') ? a.due.slice(0, 10) : null })).filter((a) => a.text).slice(0, 20),
   };
   await save(insight);

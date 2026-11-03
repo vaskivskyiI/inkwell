@@ -14,6 +14,7 @@ import { withDoc, readDoc, recognitionsOf, syncAssetRefs } from './collab.js';
 import { getSettings } from './settings.js';
 import { enqueue } from './ai/queue.js';
 import { config } from './config.js';
+import { cleanTag } from './util/tags.js';
 
 const TRASH_DAYS = 30;
 
@@ -402,11 +403,43 @@ export default async function noteRoutes(app) {
     return { ok: true };
   });
 
+  // ---- a tag renamed (or merged into another, or removed: to '') on every page the user can edit
+  app.post('/api/tags/rename', async (req) => {
+    const from = cleanTag(req.body?.from), to = cleanTag(req.body?.to);
+    if (!from || from === to) return { count: 0 };
+    const spaces = (await many(`SELECT space_id FROM space_members WHERE user_id = $1 AND role IN ('owner', 'editor')`, req.user.id)).map((r) => r.space_id)
+      .filter((s) => !isUuid(req.body?.spaceId) || s === req.body.spaceId);
+    const notes = await many('SELECT id FROM notes WHERE space_id = ANY($1::uuid[]) AND deleted_at IS NULL AND $2 = ANY(tags)', spaces, from);
+    let count = 0;
+    for (const { id } of notes) {
+      await withDoc(id, (doc) => {
+        const a = doc.getMap('meta').get('tags');
+        if (!(a instanceof Y.Array)) return;
+        const tags = a.toArray();
+        if (!tags.includes(from)) return;
+        const next = [...new Set(tags.map((t) => (t === from ? to : t)).filter(Boolean))];
+        a.delete(0, a.length);
+        a.push(next);
+        count++;
+      }, req.user);
+    }
+    // AI suggestions follow, so the old spelling is not offered again.
+    for (const r of await many(`SELECT i.note_id, i.tags_json FROM ai_insights i JOIN notes n ON n.id = i.note_id WHERE n.space_id = ANY($1::uuid[]) AND i.tags_json ? $2`, spaces, from)) {
+      await q('UPDATE ai_insights SET tags_json = $2::jsonb WHERE note_id = $1', r.note_id, JSON.stringify([...new Set(r.tags_json.map((t) => (t === from ? to : t)).filter(Boolean))]));
+    }
+    return { count };
+  });
+
   // ---- export / import
   app.get('/api/notes/:id/export', async (req, reply) => {
     const n = await needNote(req.user.id, req.params.id);
     const { title, markdown, doc } = await markdownOf(n.id);
     const file = (title || 'Untitled').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
+    if (req.query.format === 'pdf') {
+      // Opened in the browser, which prints it (Save as PDF) on A4.
+      reply.type('text/html; charset=utf-8').header('cache-control', 'no-store');
+      return pageHtml(doc, { title, print: true });
+    }
     if (req.query.format === 'html') {
       reply.header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file)}.html`).type('text/html; charset=utf-8');
       return pageHtml(doc, { title });
