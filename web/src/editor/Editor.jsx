@@ -19,6 +19,7 @@ import { get, post, stream, upload } from '../api.js';
 import { store, useStore, navigate, openNote, toast, toastError } from '../store.js';
 import { Markdown } from '../ui/Markdown.jsx';
 import { sid } from '../ink/geometry.js';
+import { inkFromHtml, inkBlockFrom } from '../ink/clipboard.js';
 import { allowKeyboard } from '../ink/keyboard.js';
 import { useDrops } from '../capture.js';
 
@@ -115,6 +116,9 @@ export function PageEditor({ note, doc, provider, user, readOnly, drops = true, 
       handlePaste: (view, event) => {
         const files = [...(event.clipboardData?.files || [])];
         if (files.length) { event.preventDefault(); files.forEach((f) => insertFile(f)); return true; }
+        // Handwriting copied from a canvas: a drawing block with the same strokes.
+        const ink = inkFromHtml(event.clipboardData?.getData('text/html'));
+        if (ink) { event.preventDefault(); editorRef.current?.chain().focus().insertContent(inkBlockFrom(doc, ink)).run(); return true; }
         const text = event.clipboardData?.getData('text/plain') || '';
         if (!event.clipboardData?.getData('text/html') && text.length > 3 && looksLikeMarkdown(text)) {
           event.preventDefault();

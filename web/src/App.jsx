@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { SidePane } from './SidePane.jsx';
 import { Menu as MenuIcon } from 'lucide-react';
+import { printPage } from './print.js';
+import { ContextMenuHost } from './ui/ContextMenu.jsx';
 import { get } from './api.js';
 import { store, useStore, localSet } from './store.js';
 import { loadSpaces, loadTree, loadFavorites, connectEvents, switchSpace } from './data.js';
@@ -50,7 +52,8 @@ export function App() {
     const onKey = (e) => {
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === 'k' && !e.target.closest?.('.prose')) { e.preventDefault(); store.set({ palette: !store.get().palette }); }
-      else if (mod && e.key.toLowerCase() === 'p' && !e.shiftKey) { e.preventDefault(); store.set({ palette: true }); }
+      // Ctrl+P prints the open page (the print view, not the app around it); elsewhere it is "go to".
+      else if (mod && e.key.toLowerCase() === 'p' && !e.shiftKey) { e.preventDefault(); const id = /^#\/n\/([^/?]+)/.exec(location.hash)?.[1]; if (id) printPage(id); else store.set({ palette: true }); }
       else if (mod && e.altKey && e.key.toLowerCase() === 'n') { e.preventDefault(); newPage(); }
       else if (mod && e.altKey && e.key.toLowerCase() === 'j') { e.preventDefault(); openToday(); }
       else if (mod && /^[1-9]$/.test(e.key) && !e.shiftKey) {
@@ -100,6 +103,7 @@ export function App() {
       <Palette />
       <QuickActions />
       <CaptureSheet />
+      <ContextMenuHost />
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.text}{t.action && <button onClick={t.action.onClick}>{t.action.label}</button>}</div>)}
       </div>

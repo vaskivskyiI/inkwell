@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FolderInput, X, CheckCheck, ArrowUpToLine, ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass, NotebookText, ListTodo, Users, Hash } from 'lucide-react';
+import { FolderInput, X, CheckCheck, ArrowUpToLine, ChevronRight, ChevronDown, Plus, Search, Home, PenLine, Trash2, Star, MessageSquare, FilePlus2, MoreHorizontal, Copy, CalendarPlus, CalendarDays, CheckSquare, Mail, Sparkles, Compass, NotebookText, ListTodo, Users, Hash, ExternalLink, Link2, Printer } from 'lucide-react';
 import { get, post } from './api.js';
 import { store, useStore, openNote, navigate, toast, toastError, localGet, localSet, currentSpace, findNote } from './store.js';
 import { onEvent, moveToSpace, movePages, trashPages } from './data.js';
 import { Menu } from './ui/Menu.jsx';
+import { openContextMenu } from './ui/ContextMenu.jsx';
+import { printPage } from './print.js';
 import { markFresh } from './fresh.js';
 
 const expandedSet = new Set(JSON.parse(localGet('expanded') || '[]'));
@@ -232,10 +234,18 @@ function TreeNode({ note, childrenMap, depth, activeId, canEdit }) {
     { label: 'Select', icon: CheckCheck, onClick: () => setSelected([...new Set([...store.get().selected, note.id])]) },
     { label: 'Move to trash', icon: Trash2, danger: true, onClick: async () => { await trashPages([note.id]); if (activeId === note.id || ancestorsOf(activeId).includes(note.id)) navigate('#/'); } },
   ];
+  // Right-click / long press on the row: the same, plus opening, the link and printing (several picked pages: what
+  // the selection bar does).
+  const onContext = (e) => openContextMenu(e, [
+    { label: 'Open', icon: ExternalLink, onClick: () => navigate(`#/n/${note.id}`) },
+    { label: 'Copy link', icon: Link2, onClick: () => { navigator.clipboard?.writeText(`${location.origin}/#/n/${note.id}`); toast('Link copied'); } },
+    { label: 'Print…', icon: Printer, onClick: () => printPage(note.id) },
+    ...(canEdit ? [{ divider: true }, ...items.filter((i) => !i.submenu && !i.danger), ...items.find((i) => i.submenu)?.submenu.map((s) => ({ ...s, label: `Move to ${s.label}`, icon: FolderInput })) || [], { divider: true }, ...items.filter((i) => i.danger)] : []),
+  ]);
   return (
     <div className="tree-node">
       <a href={`#/n/${note.id}`} data-id={note.id} aria-selected={selected || undefined} className={`tree-row${activeId === note.id ? ' on' : ''}${selected ? ' picked' : ''}${drop ? ` drop-${drop}` : ''}`} style={{ paddingLeft: 6 + depth * 14 }}
-        onClick={(e) => clickSelect(e, note.id)}
+        onClick={(e) => clickSelect(e, note.id)} onContextMenu={onContext}
         draggable={canEdit} onDragStart={(e) => {
           const sel = store.get().selected;
           dragIds = sel.includes(note.id) ? sel : [note.id];

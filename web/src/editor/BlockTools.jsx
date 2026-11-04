@@ -2,9 +2,32 @@
 // move, duplicate, delete, plus what fits the block: image size, table rows, heading links), and a bar over tables.
 import { useEffect, useRef, useState } from 'react';
 import { GripVertical, Type, Heading1, Heading2, Heading3, List, ListOrdered, ListChecks, Quote, Code, Lightbulb, Copy, Trash2, ArrowUp, ArrowDown, Link2, ExternalLink, PenLine, Unlink, MessageSquarePlus,
-  ChevronsDownUp, Rows3, Columns3, Table2, Download } from 'lucide-react';
+  ChevronsDownUp, Rows3, Columns3, Table2, Download, Scissors, ClipboardPaste, Printer } from 'lucide-react';
 import { toast } from '../store.js';
 import { imageToInk, toggleFold } from './extensions.js';
+import { inkFromHtml, inkBlockFrom, readInk } from '../ink/clipboard.js';
+import { printPage } from '../print.js';
+
+// The menu's Paste: what the clipboard holds (where the browser lets a page read it), else ink copied in this app.
+async function pasteInto(editor) {
+  const { view } = editor;
+  const inkDoc = editor.extensionManager.extensions.find((x) => x.name === 'inkBlock')?.options.doc;
+  try {
+    for (const item of await navigator.clipboard.read()) {
+      if (item.types.includes('text/html')) {
+        const html = await (await item.getType('text/html')).text();
+        const ink = inkFromHtml(html);
+        if (ink && inkDoc) editor.chain().focus().insertContent(inkBlockFrom(inkDoc, ink)).run();
+        else { view.focus(); view.pasteHTML(html); }
+        return;
+      }
+      if (item.types.includes('text/plain')) { view.focus(); view.pasteText(await (await item.getType('text/plain')).text()); return; }
+    }
+  } catch { /* not allowed to read it */ }
+  const ink = await readInk();
+  if (ink && inkDoc) editor.chain().focus().insertContent(inkBlockFrom(inkDoc, ink)).run();
+  else toast('Paste with Ctrl+V: the browser does not let the menu read the clipboard');
+}
 
 const TURN = [
   ['Text', Type, (c) => c.setParagraph()], ['Heading 1', Heading1, (c) => c.setHeading({ level: 1 })], ['Heading 2', Heading2, (c) => c.setHeading({ level: 2 })],
@@ -33,6 +56,13 @@ function buildMenu(editor, at, target, { noteId, onComment }) {
   if (!top) return [];
   const { pos, node } = top;
   const groups = [];
+  // Selected text: copy / cut; paste anywhere.
+  const sel = !state.selection.empty;
+  const clip = (cmd) => () => { view.focus(); document.execCommand(cmd); };
+  groups.push({ title: 'Edit', items: [
+    ...(sel ? [{ label: 'Cut', icon: Scissors, run: clip('cut') }, { label: 'Copy', icon: Copy, run: clip('copy') }] : []),
+    { label: 'Paste', icon: ClipboardPaste, run: () => pasteInto(editor) },
+  ] });
   const text = !['image', 'inkBlock', 'horizontalRule', 'table', 'audioBlock'].includes(node.type.name);
   if (text) {
     groups.push({ title: 'Turn into', items: TURN.map(([label, icon, run]) => ({ label, icon, run: () => { const c = editor.chain().focus(); if (at > 0) c.setTextSelection(Math.min(at, state.doc.content.size - 1)); run(c).run(); } })) });
@@ -88,6 +118,7 @@ function buildMenu(editor, at, target, { noteId, onComment }) {
     { label: 'Move up', icon: ArrowUp, run: () => move(-1) }, { label: 'Move down', icon: ArrowDown, run: () => move(1) },
     { label: 'Delete', icon: Trash2, danger: true, run: () => editor.chain().focus().deleteRange({ from: pos, to: pos + size }).run() },
   ] });
+  if (noteId) groups.push({ title: 'Page', items: [{ label: 'Print…', icon: Printer, run: () => printPage(noteId) }] });
   return groups;
 }
 

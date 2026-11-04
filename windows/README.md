@@ -15,6 +15,8 @@ server** in its own window, set up for writing with a pen:
 - `inkwell:` links open a place in the app, e.g. `inkwell:#/new?do=hand` (a blank handwritten page with the pen
   ready), `inkwell:#/new?do=today` (today's journal), `inkwell:#/search`. Also `Inkwell.exe --route=#/…` — handy
   for pinned shortcuts.
+- Right-click shows Inkwell's own menus (on the paper: cut, copy, paste handwriting; pages: open, print, …); in
+  text and fields only the editing entries, none of the browser's (Back, Reload, Inspect…).
 - Exports go to the Downloads folder; "Export as PDF" opens Windows' print dialog (Save as PDF); links to other
   sites open in the default browser.
 

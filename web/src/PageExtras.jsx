@@ -27,7 +27,8 @@ export function TagBar({ detail, doc, readOnly }) {
   const [editing, setEditing] = useState(null);
   const [value, setValue] = useState('');
   const [known, setKnown] = useState([]);
-  const loadKnown = () => get(`/api/tags?space=${detail.spaceId}`).then(setKnown).catch(() => {});
+  const [loaded, setLoaded] = useState(false);
+  const loadKnown = () => get(`/api/tags?space=${detail.spaceId}`).then((k) => { setKnown(k); setLoaded(true); }).catch(() => {});
   useEffect(() => { if (!readOnly) loadKnown(); }, [detail.spaceId, readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
   const knownTags = known.map((x) => x.tag);
   const hashtags = (detail.tags || []).filter((t) => !manual.includes(t));
@@ -74,8 +75,12 @@ export function TagBar({ detail, doc, readOnly }) {
       dismiss(from);
     });
   };
+  // "Tags the AI finds: add them": the server adds new ones itself; this catches pages analysed before that.
+  const autoTags = useStore((s) => (s.settings?.aiTags || 'apply') === 'apply');
+  const pending = autoTags && !readOnly && loaded ? suggested.join() : '';
+  useEffect(() => { if (pending) doc.transact(() => { const a = tagsArr(); a.push(pending.split(',').filter((t) => !a.toArray().includes(t))); }); }, [pending]); // eslint-disable-line react-hooks/exhaustive-deps
   const search = (t) => navigate(`#/search?q=${encodeURIComponent(`tag:${t}`)}`);
-  if (readOnly && !manual.length && !hashtags.length) return null;
+  if (readOnly &&!manual.length && !hashtags.length) return null;
   const input = (initial, done) => (
     <input autoFocus list="known-tags" defaultValue={initial} placeholder="tag name" size={Math.max(8, initial.length + 2)}
       onKeyDown={(e) => {

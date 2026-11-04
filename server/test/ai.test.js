@@ -200,16 +200,27 @@ test('AI tags reuse the spelling of tags already in the space; tags can be renam
   const { insight } = await ann.get(`/api/notes/${n.id}`);
   assert.ok(insight.tags.includes('meetings') && !insight.tags.includes('meeting'), insight.tags.join());
 
+  const meta = async (id) => { let tags; await withDoc(id, (d) => { tags = d.getMap('meta').get('tags')?.toArray(); }); return tags; };
+  // By default the AI's tags are added to the page; a tag removed there (tagsHidden) does not come back.
+  assert.ok((await meta(n.id)).includes('meetings'));
   const { matchTag } = await import('../src/util/tags.js');
   assert.deepEqual(['IJS plus', 'ijs-plus', 'IJSplus', 'IJS_Plus', 'other'].map((t) => matchTag(t, ['ijsplus'])), ['ijsplus', 'ijsplus', 'ijsplus', 'ijsplus', 'other']);
 
   // Renamed on every page, AI suggestions included; '' removes it.
-  assert.equal((await ann.post('/api/tags/rename', { from: 'meetings', to: 'Team meetings', spaceId: work() })).count, 1);
-  const meta = async (id) => { let tags; await withDoc(id, (d) => { tags = d.getMap('meta').get('tags')?.toArray(); }); return tags; };
+  assert.equal((await ann.post('/api/tags/rename', { from: 'meetings', to: 'Team meetings', spaceId: work() })).count, 2);
   assert.deepEqual(await meta(tagged.id), ['team-meetings', 'ijsplus']);
   assert.ok((await ann.get(`/api/notes/${n.id}`)).insight.tags.includes('team-meetings'));
   await ann.post('/api/tags/rename', { from: 'ijsplus', to: '' });
   assert.deepEqual(await meta(tagged.id), ['team-meetings']);
+
+  // "Only suggest": the page keeps just its own tags.
+  await ann.put('/api/settings', { aiTags: 'suggest' });
+  const m = await ann.post('/api/notes', { spaceId: work(), title: '', markdown: 'Another meeting about the budget for next year, with notes.' });
+  await ann.post(`/api/notes/${m.id}/ai/refresh`);
+  await drain();
+  assert.ok((await ann.get(`/api/notes/${m.id}`)).insight.tags.length);
+  assert.equal(await meta(m.id), undefined);
+  await ann.put('/api/settings', { aiTags: 'apply' });
 });
 
 test('a title written by hand is read on the spot; PDF export cuts handwriting into A4 pages between lines', async () => {

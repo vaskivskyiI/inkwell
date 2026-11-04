@@ -5,7 +5,7 @@
 // (inkTool.finger): otherwise one finger or the mouse moves the paper, two fingers move and zoom it, and a palm next
 // to the pen is ignored.
 import { useEffect, useLayoutEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Copy, Scissors, ClipboardPaste, BoxSelect, Undo2, Redo2 } from 'lucide-react';
 import * as Y from 'yjs';
 import { CANVAS_WIDTH, TOOLS, outline, path2d, hits, strokeInLasso, bounds, sid } from './geometry.js';
 import { recognize, eraseFromStroke } from './shapes.js';
@@ -13,9 +13,12 @@ import { keepKeyboardAway } from './keyboard.js';
 import { CanvasImages, LOCAL, shiftImages, imagesBottom } from './CanvasImages.jsx';
 import { useStore, store, toast, localGet, localSet } from '../store.js';
 import { toolSize, toolColor } from './tools.js';
+import { putInk, inkFromHtml, writeInk, readInk, placeAt } from './clipboard.js';
+import { openContextMenu, pressedJustNow } from '../ui/ContextMenu.jsx';
 
 const MAX_ZOOM = 3;
 let penAt = 0; // last time the pen touched or hovered: touches right after are the hand resting on the screen
+let drewAt = 0; // last stroke end: a pen held still at the end of a stroke is not a right-click
 export const penOnlyActive = () => !store.get().inkTool?.finger;
 const INKING = ['pen', 'hl', 'eraser'];
 let hinted = false;
@@ -58,12 +61,12 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
   useImperativeHandle(ref, () => ({
     undo: () => undo.current?.undo(), redo: () => undo.current?.redo(),
     canUndo: () => !!undo.current?.undoStack.length, canRedo: () => !!undo.current?.redoStack.length,
-    clearSelection, deleteSelection, strokes: () => strokes.current,
+    clearSelection, deleteSelection, strokes: () => strokes.current, copySelection: () => writeInk(selected()), selectAll,
     select: (ids) => { sel.current = { ids: new Set(ids), box: null }; schedule(); force((x) => x + 1); wrap.current?.focus({ preventScroll: true }); },
     // Insert / close space from a handle outside the canvas (a divider's grip): the drag continues here.
     startSpace: (e, y) => { if (readOnly) return; e.preventDefault(); live.current.setPointerCapture(e.pointerId); beginSpace(y, e); }, clear: () => { const a = yarr.current; if (a?.length) doc.transact(() => a.delete(0, a.length), LOCAL); },
     // Where a new picture goes: the middle of what is on screen, in canvas units.
-    viewCenter: () => { const r = live.current.getBoundingClientRect(); return { x: (Math.min(r.right, window.innerWidth) / 2 + Math.max(r.left, 0) / 2 - r.left) / scale, y: ((Math.max(r.top, 0) + Math.min(r.bottom, window.innerHeight)) / 2 - r.top) / scale }; },
+    viewCenter: () => { const v = visible(); return { x: v.cx, y: v.cy }; },
     zoomIn: () => zoomTo(zoom * 1.25), zoomOut: () => zoomTo(zoom / 1.25), zoomReset: () => zoomTo(1), zoom: () => zoom,
   }));
 
@@ -172,7 +175,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
   // ---- drawing (observers live across renders: they reach the current render's functions through `latest`)
   const raf = useRef(0);
   const latest = useRef({});
-  latest.current = { redraw, grow, autoGrow, onStrokesChange, zoomTo, zoom, shrink };
+  latest.current = { redraw, grow, autoGrow, onStrokesChange, zoomTo, zoom, shrink, edgeTick };
   function schedule() { cancelAnimationFrame(raf.current); raf.current = requestAnimationFrame(() => latest.current.redraw()); }
 
   function setup(c) {
@@ -219,6 +222,83 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function clearSelection() { sel.current = { ids: new Set(), box: null }; schedule(); force((x) => x + 1); }
+  function setSelection(ids) { sel.current = { ids: new Set(ids), box: null }; schedule(); force((x) => x + 1); }
+  function selectAll() { setSelection(strokes.current.map((s) => s.id)); wrap.current?.focus({ preventScroll: true }); }
+  const selected = () => strokes.current.filter((s) => sel.current.ids.has(s.id)).map(shown);
+  // The part of the canvas on screen, in canvas units.
+  function visible() {
+    const r = live.current.getBoundingClientRect();
+    const sp = scrollParent(wrap.current);
+    const box = sp && sp !== document.scrollingElement ? sp.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+    const top = (Math.max(r.top, box.top, 0) - r.top) / scale, bottom = (Math.min(r.bottom, box.bottom, window.innerHeight) - r.top) / scale;
+    const left = (Math.max(r.left, 0) - r.left) / scale, right = (Math.min(r.right, window.innerWidth, wrap.current.getBoundingClientRect().right) - r.left) / scale;
+    return { top, bottom, left, right, cx: (left + right) / 2, cy: (top + Math.max(top, bottom)) / 2 };
+  }
+  // Pasted ink: at the given point (a menu), else where it was copied from when that is on screen (a little lower
+  // while the same ink is still there), else in the middle of the screen. It comes in selected, ready to be moved.
+  function paste(ink, at) {
+    if (readOnly || !ink?.length) return;
+    const b = bounds(ink);
+    const w = b.maxX - b.minX, hh = b.maxY - b.minY;
+    const v = visible();
+    let x, y;
+    if (at) { x = at.x; y = at.y; }
+    else if (b.minY >= v.top && b.maxY <= v.bottom) {
+      x = b.minX; y = b.minY;
+      const fx = ink[0].p[0] - b.minX, fy = ink[0].p[1] - b.minY;
+      const taken = (px, py) => strokes.current.some((s) => Math.abs(s.p[0] - px) < 0.5 && Math.abs(s.p[1] + offOf(s) - py) < 0.5);
+      for (let i = 0; i < 30 && taken(x + fx, y + fy); i++) { x += 24; y += 24; }
+    } else { x = v.cx - w / 2; y = v.cy - hh / 2; }
+    x = Math.max(0, Math.min(x, CANVAS_WIDTH - w));
+    const placed = placeAt(ink, x, y).map((s) => { const anchor = anchorFor?.(s); return anchor ? { ...s, a: anchor } : s; });
+    const a = ensureArray();
+    doc.transact(() => a.push(placed), LOCAL);
+    const bottom = bounds(placed).maxY;
+    if (onHeightChange && bottom > h - (autoGrow ? 300 : 20)) onHeightChange(Math.ceil((bottom + (autoGrow ? 600 : 60)) / 20) * 20);
+    setSelection(placed.map((s) => s.id));
+    wrap.current?.focus({ preventScroll: true });
+  }
+  function cut() { writeInk(selected()); deleteSelection(); }
+  // Right-click, the pen's barrel button, or a long press.
+  function menu(e) {
+    const r = live.current.getBoundingClientRect();
+    const at = { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
+    const has = sel.current.ids.size > 0;
+    openContextMenu(e, [
+      { label: 'Cut', icon: Scissors, keys: 'Ctrl+X', disabled: !has, hidden: readOnly, onClick: cut },
+      { label: 'Copy', icon: Copy, keys: 'Ctrl+C', disabled: !has, onClick: () => writeInk(selected()) },
+      { label: 'Paste', icon: ClipboardPaste, keys: 'Ctrl+V', hidden: readOnly, onClick: async () => { const ink = await readInk(); if (ink) paste(ink, at); else toast('Nothing to paste: copy some handwriting first'); } },
+      { label: 'Delete', icon: Trash2, keys: 'Del', disabled: !has, hidden: readOnly, danger: true, onClick: deleteSelection },
+      { divider: true },
+      { label: 'Select all', icon: BoxSelect, keys: 'Ctrl+A', disabled: !strokes.current.length, onClick: selectAll },
+      { label: 'Undo', icon: Undo2, keys: 'Ctrl+Z', hidden: readOnly, disabled: !undo.current?.undoStack.length, onClick: () => undo.current?.undo() },
+      { label: 'Redo', icon: Redo2, keys: 'Ctrl+Y', hidden: readOnly, disabled: !undo.current?.redoStack.length, onClick: () => undo.current?.redo() },
+    ]);
+  }
+  function onContextMenu(e) {
+    e.preventDefault();
+    if (pressedJustNow() || Date.now() - drewAt < 800) return;
+    const gs = g.current;
+    if (gs && !(gs.kind === 'idle' || (gs.kind === 'scroll' && gs.moved < 10) || (gs.kind === 'move' && !gs.dx && !gs.dy))) return;
+    clearTimeout(press.current);
+    g.current = null; clearLive();
+    e.stopPropagation();
+    menu(e);
+  }
+  // A finger held still on the paper (or on the selection) opens the menu.
+  const press = useRef(0);
+  function armPress(e) {
+    clearTimeout(press.current);
+    if (e.pointerType !== 'touch') return;
+    const gs = g.current, x = e.clientX, y = e.clientY;
+    if (!gs || !['scroll', 'idle', 'move'].includes(gs.kind)) return;
+    gs.px = x; gs.py = y;
+    press.current = setTimeout(() => {
+      if (g.current !== gs || (gs.kind === 'move' && (gs.dx || gs.dy)) || (gs.kind === 'scroll' && gs.moved > 10)) return;
+      g.current = null; clearLive();
+      menu({ clientX: x, clientY: y, preventDefault() {}, stopPropagation() {} });
+    }, 550);
+  }
   function deleteSelection() {
     const a = yarr.current;
     if (!a || !sel.current.ids.size) return;
@@ -259,7 +339,8 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
   const selBox = () => (sel.current.ids.size ? bounds(strokes.current.filter((s) => sel.current.ids.has(s.id)).map(shown)) : null);
   const inSel = (p) => { const b = selBox(); return !!b && p[0] > b.minX - 14 && p[0] < b.maxX + 14 && p[1] > b.minY - 14 && p[1] < b.maxY + 14; };
 
-  function onDown(e) {
+  function onDown(e) { down(e); armPress(e); }
+  function down(e) {
     if (e.pointerType === 'pen') penAt = Date.now();
     if (e.pointerType !== 'touch') pointerKind(e);
     keepKeyboardAway();
@@ -357,12 +438,49 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
       if (n > 6 && Math.hypot(p0[n - 3] - p0[n - 6], p0[n - 2] - p0[n - 5]) > 1.5 / Math.max(scale, 0.3)) armHold();
       drawLive();
     } else if (gs.kind === 'erase') for (const ev of events) erase(pt(ev));
-    else if (gs.kind === 'lasso') { const p = pt(e); gs.poly.push([p[0], p[1]]); drawLive(); }
-    else if (gs.kind === 'move') { const p = pt(e); gs.dx = p[0] - gs.from[0]; gs.dy = p[1] - gs.from[1]; drawLive(); }
+    else if (gs.kind === 'lasso') { const p = pt(e); gs.poly.push([p[0], p[1]]); drawLive(); edge(gs, e); }
+    else if (gs.kind === 'move') { if (gs.px != null && Math.hypot(e.clientX - gs.px, e.clientY - gs.py) < 8) return; gs.px = null; moveTo(gs, pt(e)); edge(gs, e); }
     else if (gs.kind === 'space') { gs.dy = Math.max(Math.min(0, gs.minDy), pt(e)[1] - gs.y0); drawLive(); }
   }
 
+  // Moving the selection: it stays on the paper; near the bottom more paper comes.
+  function moveTo(gs, p) {
+    const b = selBox();
+    if (!b) return;
+    gs.dx = Math.max(-b.minX, Math.min(CANVAS_WIDTH - b.maxX, p[0] - gs.from[0]));
+    gs.dy = Math.max(-b.minY, p[1] - gs.from[1]);
+    if (onHeightChange && b.maxY + gs.dy > h - 150) onHeightChange(Math.ceil((b.maxY + gs.dy + (autoGrow ? 600 : 200)) / 20) * 20);
+    drawLive();
+  }
+  // Moving a selection or drawing a lasso near the edge of the screen: the paper scrolls along, so ink can go to a
+  // part of the page that was not on screen.
+  const auto = useRef(0);
+  function edge(gs, e) {
+    gs.cx = e.clientX; gs.cy = e.clientY;
+    if (!auto.current) auto.current = requestAnimationFrame(() => latest.current.edgeTick());
+  }
+  function edgeTick() {
+    auto.current = 0;
+    const gs = g.current;
+    if (!gs || !['move', 'lasso'].includes(gs.kind) || gs.cx == null || !wrap.current) return;
+    const sp = scrollParent(wrap.current);
+    const box = sp && sp !== document.scrollingElement ? sp.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+    const wr = wrap.current.getBoundingClientRect();
+    const top = Math.max(box.top, 0), bottom = Math.min(box.bottom, window.innerHeight);
+    const E = 56, speed = (d) => Math.min(24, Math.ceil(d / 3));
+    const vy = gs.cy < top + E ? -speed(top + E - gs.cy) : gs.cy > bottom - E ? speed(gs.cy - (bottom - E)) : 0;
+    const vx = zoom <= 1 ? 0 : gs.cx < wr.left + E ? -speed(wr.left + E - gs.cx) : gs.cx > wr.right - E ? speed(gs.cx - (wr.right - E)) : 0;
+    const y0 = sp.scrollTop, x0 = wrap.current.scrollLeft;
+    if (vy) sp.scrollBy(0, vy);
+    if (vx) wrap.current.scrollLeft += vx;
+    if (sp.scrollTop === y0 && wrap.current.scrollLeft === x0) return;
+    const p = pt({ clientX: gs.cx, clientY: gs.cy, pointerType: 'mouse', pressure: 0.5 });
+    if (gs.kind === 'move') moveTo(gs, p); else { gs.poly.push([p[0], p[1]]); drawLive(); }
+    auto.current = requestAnimationFrame(() => latest.current.edgeTick());
+  }
+
   function onUp(e) {
+    clearTimeout(press.current);
     if (e?.pointerType === 'touch') touches.current.delete(e.pointerId);
     if (e?.pointerType === 'pen') penAt = Date.now();
     const gs = g.current;
@@ -374,6 +492,7 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     clearTimeout(gs.hold);
     clearLive();
     if (gs.kind === 'draw') {
+      drewAt = Date.now();
       const s = gs.stroke;
       // Shapes mode: larger strokes are straightened or smoothed when lifted (handwriting is left alone).
       if (!gs.snapped && tool.shapes && s.t === 'pen') { const r = shapeOf(s, { minSize: 60 }); if (r) s.p = r.p; }
@@ -424,6 +543,8 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
       }, LOCAL);
       sel.current = { ids: new Set(moved.map((s) => s.id)), box: null };
       schedule(); force((x) => x + 1);
+      const bottom = bounds(moved.map(shown))?.maxY || 0;
+      if (onHeightChange && bottom > h - 20) onHeightChange(Math.ceil((bottom + (autoGrow ? 600 : 60)) / 20) * 20);
     }
   }
 
@@ -486,7 +607,17 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
     else if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); zoomTo(zoom * 1.25); }
     else if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); zoomTo(zoom / 1.25); }
     else if ((e.ctrlKey || e.metaKey) && e.key === '0') { e.preventDefault(); zoomTo(1); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); e.stopPropagation(); selectAll(); }
     else if (e.key === 'Escape') clearSelection();
+  }
+  // Ctrl+C / Ctrl+X / Ctrl+V while the paper has focus (and the same from the browser's own Edit menu).
+  function onCopy(e) { if (!sel.current.ids.size) return; e.preventDefault(); e.stopPropagation(); putInk(e, selected()); }
+  function onCut(e) { if (!sel.current.ids.size || readOnly) return; onCopy(e); deleteSelection(); }
+  function onPaste(e) {
+    const ink = inkFromHtml(e.clipboardData?.getData('text/html'));
+    if (!ink || readOnly) return; // pictures and text: whoever holds the canvas (a journal) takes them
+    e.preventDefault(); e.stopPropagation();
+    paste(ink);
   }
 
   const step = { ruled: 32, grid: 32, dotted: 32 }[paper];
@@ -499,16 +630,18 @@ export const InkCanvas = forwardRef(function InkCanvas({ doc, canvasId, height, 
   const W = width * zoom, H = h * scale;
   const sb = !readOnly && !g.current && selBox();
   return (
-    <div ref={wrap} className={`ink-canvas${zoom > 1 ? ' zoomed' : ''}`} style={{ height: H }} tabIndex={readOnly ? -1 : 0} onKeyDown={onKey}
+    <div ref={wrap} className={`ink-canvas${zoom > 1 ? ' zoomed' : ''}`} style={{ height: H }} tabIndex={readOnly ? -1 : 0} onKeyDown={onKey} onCopy={onCopy} onCut={onCut} onPaste={onPaste}
       onBlur={(e) => { if (!wrap.current?.contains(e.relatedTarget)) shrink(); }}>
       <div className="ink-inner" style={{ width: W || '100%', height: H, ...bg }}>
         {background && <img className="ink-photo" src={background} alt="" draggable={false} />}
         {images && <CanvasImages doc={doc} canvasId={canvasId} scale={scale} active={tool.tool === 'pick'} readOnly={readOnly} onBottom={(b) => { if (onHeightChange && b > h - 40) onHeightChange(Math.ceil((b + 120) / 10) * 10); }} />}
         <canvas ref={base} style={{ width: W, height: H, pointerEvents: 'none' }} />
         <canvas ref={live} className="ink-live" style={{ width: W, height: H, cursor, touchAction: 'none', pointerEvents: tool.tool === 'pick' && images ? 'none' : undefined }}
-          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onContextMenu={(e) => e.preventDefault()} />
+          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onContextMenu={onContextMenu} />
         {children?.(scale)}
-        {sb && <div className="ink-sel-bar" style={{ left: Math.max(0, Math.min(sb.maxX * scale - 36, W - 40)), top: Math.max(0, sb.minY * scale - 42) }}>
+        {sb && <div className="ink-sel-bar" style={{ left: Math.max(0, Math.min(sb.maxX * scale - 100, W - 104)), top: Math.max(0, sb.minY * scale - 42) }}>
+          <button title="Cut (Ctrl+X)" aria-label="Cut the selection" onPointerDown={(e) => e.preventDefault()} onClick={cut}><Scissors size={15} /></button>
+          <button title="Copy (Ctrl+C)" aria-label="Copy the selection" onPointerDown={(e) => e.preventDefault()} onClick={() => { writeInk(selected()); toast('Copied: paste with Ctrl+V, or hold a finger on the paper'); }}><Copy size={15} /></button>
           <button title="Delete the selection" aria-label="Delete the selection" onPointerDown={(e) => e.preventDefault()} onClick={deleteSelection}><Trash2 size={15} /></button>
         </div>}
       </div>

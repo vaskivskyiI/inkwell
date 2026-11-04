@@ -1,11 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
-import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2, MoveHorizontal, MessagesSquare, FileCode2, Camera, Smartphone, Image as ImageIcon, Type, FileDown } from 'lucide-react';
+import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2, MoveHorizontal, MessagesSquare, FileCode2, Camera, Smartphone, Image as ImageIcon, Type, FileDown, Printer } from 'lucide-react';
 import { toggleFullscreen, toggleCanvasFullscreen, pageCanvas } from './ui/fullscreen.js';
 import { get, post, put, patch, del } from './api.js';
 import { store, useStore, findNote, openNote, navigate, toast, toastError, localSet } from './store.js';
 import { openDoc, onEvent, loadFavorites, forgetDoc, moveToSpace } from './data.js';
 import { PageEditor } from './editor/Editor.jsx';
 import { MarkdownSource } from './editor/MarkdownSource.jsx';
+import { printPage } from './print.js';
 import { photoTo, requestPhoto, touchDevice, useActivePage } from './capture.js';
 import { useNarrow } from './QuickActions.jsx';
 import { JournalView } from './ink/JournalView.jsx';
@@ -175,7 +176,8 @@ function NoteHeader({ detail, setDetail, handle, readOnly, wide }) {
     { label: 'Move to space…', icon: FolderInput, hidden: readOnly, submenu: spaces.filter((s) => s.id !== detail.spaceId && ['owner', 'editor'].includes(s.role)).map((s) => ({ label: `${s.icon} ${s.name}`, onClick: () => moveToSpace(detail.id, s).then((moved) => { if (moved) store.set({ spaceId: s.id }); }).catch(toastError) })) },
     { label: 'Export as Markdown', icon: Download, onClick: () => { location.href = `/api/notes/${detail.id}/export`; } },
     { label: 'Export as HTML', icon: Download, onClick: () => { location.href = `/api/notes/${detail.id}/export?format=html`; } },
-    { label: 'Export as PDF', icon: FileDown, onClick: () => exportPdf(detail.id) },
+    { label: 'Export as PDF', icon: FileDown, onClick: () => printPage(detail.id, { pdf: true }) },
+    { label: 'Print…', icon: Printer, keys: 'Ctrl+P', onClick: () => printPage(detail.id) },
     { label: detail.publicSlug ? 'Public link…' : 'Share public link…', icon: Globe, hidden: readOnly, onClick: async () => {
       const { slug } = await post(`/api/notes/${detail.id}/publish`);
       setDetail((d) => ({ ...d, publicSlug: slug }));
@@ -222,20 +224,6 @@ function NoteHeader({ detail, setDetail, handle, readOnly, wide }) {
       </div>
     </header>
   );
-}
-
-// A print-ready page (A4, handwriting cut between lines) and the browser's print dialog, where "Save as PDF" is.
-// Phones print what is on screen, so there it opens in its own tab.
-function exportPdf(id) {
-  const url = `/api/notes/${id}/export?format=pdf`;
-  if (touchDevice()) { window.open(url, '_blank'); return; }
-  document.getElementById('print-frame')?.remove();
-  const f = document.createElement('iframe');
-  f.id = 'print-frame';
-  f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
-  f.src = url;
-  document.body.appendChild(f);
-  toast('Preparing the PDF…');
 }
 
 function TitleRow({ detail, setDetail, doc, readOnly }) {

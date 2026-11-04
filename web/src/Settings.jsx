@@ -303,6 +303,9 @@ function AiSettings() {
       <label className="check"><input type="checkbox" checked={settings.ai.enabled} onChange={(e) => saveSettings({ ai: { enabled: e.target.checked } })} /> Use AI</label>
       <label className="check"><input type="checkbox" checked={settings.ai.background} onChange={(e) => saveSettings({ ai: { background: e.target.checked } })} /> Work in the background <span className="hint">— summaries, handwriting, image text and search index are ready before you ask.</span></label>
       <Field label="Language of AI output" hint="Empty: the language of each page."><input value={settings.language} placeholder="e.g. Slovenian" onChange={(e) => store.set({ settings: { ...settings, language: e.target.value } })} onBlur={(e) => saveSettings({ language: e.target.value })} /></Field>
+      <Field label="Tags the AI finds" hint="Removed tags are not added again on that page.">
+        <div className="seg">{[['apply', 'Add them to the page'], ['suggest', 'Only suggest']].map(([v, l]) => <button key={v} className={(settings.aiTags || 'apply') === v ? 'on' : ''} onClick={() => saveSettings({ aiTags: v })}>{l}</button>)}</div>
+      </Field>
 
       <h3>Providers</h3>
       {providers.map((p) => (

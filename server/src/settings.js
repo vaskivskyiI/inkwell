@@ -7,7 +7,8 @@ export const DEFAULT_SETTINGS = {
   ai: { enabled: true, background: true, chat: null, vision: null, embed: null },
   paper: 'ruled',          // default journal paper: ruled | grid | dotted | plain
   penOnly: 'auto',         // auto | on | off — when on, touch scrolls and only a pen draws
-  journalSpace: '',        // space for daily journal pages (default: the first space the user owns)
+  journalSpace: '',
+  aiTags: 'apply',         // apply | suggest — tags the AI finds are added to the page, or only offered        // space for daily journal pages (default: the first space the user owns)
 };
 
 const merge = (a, b) => {

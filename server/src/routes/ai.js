@@ -105,7 +105,7 @@ export default async function aiRoutes(app) {
   app.put('/api/settings', async (req) => {
     const b = req.body || {};
     const allowed = {};
-    for (const k of ['theme', 'language', 'paper', 'penOnly', 'journalSpace']) if (b[k] !== undefined) allowed[k] = str(b[k], 60);
+    for (const k of ['theme', 'language', 'paper', 'penOnly', 'journalSpace', 'aiTags']) if (b[k] !== undefined) allowed[k] = str(b[k], 60);
     if (b.ai && typeof b.ai === 'object') {
       allowed.ai = {};
       for (const k of ['enabled', 'background']) if (b.ai[k] !== undefined) allowed.ai[k] = !!b.ai[k];

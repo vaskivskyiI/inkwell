@@ -1,17 +1,18 @@
 // Background AI handlers. Each one is idempotent: it reads the current page state, so a job that runs late simply
 // works on the newest content.
+import * as Y from 'yjs';
 import { one, many, q, tx, now } from '../db/index.js';
 import { registerHandler, enqueue, kick } from './queue.js';
 import { resolve, askJson } from './router.js';
 import { analyzePrompt, inkPrompt, imagePrompt } from './prompts.js';
-import { readDoc, persist, recognitionsOf } from '../collab.js';
+import { readDoc, persist, recognitionsOf, withDoc } from '../collab.js';
 import { extract, strokesOf, strokesHash } from '../docmodel.js';
 import { strokesToPng } from '../ink/render.js';
 import { readAsset } from '../assets.js';
 import { getSettings } from '../settings.js';
 import { publish } from '../events.js';
 import { logger } from '../util/log.js';
-import { matchTag } from '../util/tags.js';
+import { matchTag, tagKey } from '../util/tags.js';
 import { tagList } from '../search.js';
 
 const log = logger('ai');
@@ -33,7 +34,8 @@ registerHandler('analyze', async (job) => {
   const settings = await backgroundAllowed(job.user_id);
   if (!settings) return;
   const doc = await readDoc(n.id);
-  const info = extract(doc, { recognitions: await recognitionsOf(n.id) });
+  const recognitions = await recognitionsOf(n.id);
+  const info = extract(doc, { recognitions });
   // meeting_json IS NULL: analysed before meetings were recognised — once more ("Re-analyse all my pages").
   const existing = await one('SELECT content_hash, meeting_json IS NOT NULL AS asked FROM ai_insights WHERE note_id = $1', n.id);
   if (existing?.content_hash === info.hash && existing.asked) return;
@@ -58,8 +60,28 @@ registerHandler('analyze', async (job) => {
     actions: (Array.isArray(out.actions) ? out.actions : []).map((a) => ({ text: String(a?.text || a || '').slice(0, 300), due: /^\d{4}-\d{2}-\d{2}/.test(a?.due || '') ? a.due.slice(0, 10) : null })).filter((a) => a.text).slice(0, 20),
   };
   await save(insight);
+  if (settings.aiTags !== 'suggest' && insight.tags.length) await applyTags(n.id, insight.tags, recognitions);
   publish(n.space_id, 'ai:insight', { noteId: n.id, insight });
 });
+
+// "AI tags: add them" (the default): the page gets the suggested tags it does not have yet, except ones removed or
+// dismissed on it before. The analysed state then includes them, so adding tags does not start another analysis.
+async function applyTags(noteId, tags, recognitions) {
+  let hash;
+  await withDoc(noteId, (doc) => {
+    const meta = doc.getMap('meta');
+    const hidden = new Set((meta.get('tagsHidden')?.toArray?.() || []).map(tagKey));
+    const have = new Set(extract(doc, { recognitions }).tags.map(tagKey));
+    const add = tags.filter((t) => !have.has(tagKey(t)) && !hidden.has(tagKey(t)));
+    if (add.length) {
+      let a = meta.get('tags');
+      if (!(a instanceof Y.Array)) { a = new Y.Array(); meta.set('tags', a); }
+      a.push(add);
+    }
+    hash = extract(doc, { recognitions }).hash;
+  });
+  await q('UPDATE ai_insights SET content_hash = $2 WHERE note_id = $1', noteId, hash);
+}
 
 // The name of a meeting as it is already written in the notes, when only case, spacing or punctuation differ.
 const meetKey = (t) => String(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
@@ -173,7 +195,8 @@ registerHandler('embed', async (job) => {
   const r = await resolve(job.user_id, 'embed', { spaceId: n.space_id });
   if (!r) return NO_PROVIDER;
   const doc = await readDoc(n.id);
-  const info = extract(doc, { recognitions: await recognitionsOf(n.id) });
+  const recognitions = await recognitionsOf(n.id);
+  const info = extract(doc, { recognitions });
   const parts = chunk(`${info.title}\n\n${info.markdown}`.trim());
   if (!parts.length || info.markdown.trim().length < 10) { await q('DELETE FROM embeddings WHERE note_id = $1', n.id); return; }
   const vecs = [];

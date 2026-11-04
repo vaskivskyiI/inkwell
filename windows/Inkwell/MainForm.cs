@@ -110,10 +110,26 @@ public sealed class MainForm : Form
 
     static string Version => Application.ProductVersion.Split('+')[0];
 
+    static readonly HashSet<string> BrowserOnly = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "back", "forward", "reload", "saveAs", "print", "createQrCode", "inspectElement", "share", "webCapture", "openLinkInNewWindow",
+        "saveLinkAs", "saveImageAs", "saveMediaAs", "openImageInNewWindow", "searchWeb", "searchImageOnWeb", "readAloud", "translate", "copyLinkToHighlight",
+    };
+
     /// <summary>What the main window and its pop-ups share: links, downloads, certificates.</summary>
     void Wire(CoreWebView2 core)
     {
         core.NewWindowRequested += (_, e) => NewWindow(core, e);
+        // Right-click where the page has no menu of its own (text, fields, links, pictures): the editing and copying
+        // entries, not the browser's (Back, Reload, Save as, Print the app, Inspect, …).
+        core.ContextMenuRequested += (_, e) =>
+        {
+            var items = e.MenuItems;
+            for (var i = items.Count - 1; i >= 0; i--) if (BrowserOnly.Contains(items[i].Name)) items.RemoveAt(i);
+            for (var i = items.Count - 1; i >= 0; i--)
+                if (items[i].Kind == CoreWebView2ContextMenuItemKind.Separator && (i == 0 || i == items.Count - 1 || items[i - 1].Kind == CoreWebView2ContextMenuItemKind.Separator)) items.RemoveAt(i);
+            if (items.Count == 0) e.Handled = true;
+        };
         core.DownloadStarting += (_, e) =>
         {
             var downloads = Shell.Downloads;
