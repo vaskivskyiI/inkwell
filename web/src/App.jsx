@@ -4,8 +4,9 @@ import { Menu as MenuIcon } from 'lucide-react';
 import { printPage } from './print.js';
 import { ContextMenuHost } from './ui/ContextMenu.jsx';
 import { get } from './api.js';
-import { store, useStore, localSet } from './store.js';
-import { loadSpaces, loadTree, loadFavorites, connectEvents, switchSpace } from './data.js';
+import { store, useStore, localSet, localGet } from './store.js';
+import { loadSpaces, loadTree, loadFavorites, connectEvents, switchSpace, keepOffline } from './data.js';
+import { loadOutbox, forgetAll } from './offline.js';
 import { setUnauthorizedHandler } from './api.js';
 import { Sidebar, newPage, openToday } from './Sidebar.jsx';
 import { NoteView } from './NoteView.jsx';
@@ -19,9 +20,13 @@ import { Rail } from './Rail.jsx';
 import { AuthPage } from './Auth.jsx';
 
 async function boot() {
+  await loadOutbox(); // pages made offline are known before any page opens
   const st = await get('/api/auth/state');
+  if (!st.user) { store.set({ authState: st, user: null }); return; }
+  // Someone else signed in on this device: the previous account's offline copies go.
+  if (localGet('lastUser') && localGet('lastUser') !== st.user.id) await forgetAll();
+  localSet('lastUser', st.user.id);
   store.set({ authState: st, user: st.user });
-  if (!st.user) return;
   // Back from signing in with Halcyon: on to where the link pointed.
   try { const h = sessionStorage.getItem('afterLogin'); sessionStorage.removeItem('afterLogin'); if (h) location.hash = h; } catch { /* no storage: stays on the home page */ }
   const [spaces, settings, halcyon] = await Promise.all([loadSpaces(), get('/api/settings'), get('/api/integrations/halcyon').catch(() => ({ connected: false }))]);
@@ -31,7 +36,9 @@ async function boot() {
   loadFavorites().catch(() => {});
   connectEvents();
   // Other spaces' trees load in the background (page links and the palette search across them).
-  for (const s of spaces) if (!store.get().trees[s.id]) loadTree(s.id).catch(() => {});
+  await Promise.all(spaces.map((s) => (store.get().trees[s.id] ? null : loadTree(s.id).catch(() => {}))));
+  // Then, quietly, the pages chosen in Settings → Offline are kept on this device.
+  setTimeout(() => keepOffline().catch(() => {}), 5000);
 }
 
 export function App() {

@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
-import { User, Layers, Sparkles, PenLine, Plug, KeyRound, Shield, Trash2, Plus, Check, RefreshCw, Upload, Pencil, Download } from 'lucide-react';
+import { User, Layers, Sparkles, PenLine, Plug, KeyRound, Shield, Trash2, Plus, Check, RefreshCw, Upload, Pencil, Download, CloudOff } from 'lucide-react';
 import { get, post, put, patch, del, sendFile } from './api.js';
 import { installApp, standalone, iosDevice } from './pwa.js';
 import { store, useStore, navigate, openNote, toast, toastError, localGet } from './store.js';
-import { loadSpaces, switchSpace, loadTree } from './data.js';
+import { loadSpaces, switchSpace, loadTree, offlinePolicy, setOfflinePolicy, wantedPages, keepOffline } from './data.js';
+import { pendingCount, onOutbox } from './offline.js';
 import { setTheme } from './theme.js';
 import { setInkTool } from './ink/tools.js';
 
-const SECTIONS = [['profile', 'Profile', User], ['spaces', 'Spaces & sharing', Layers], ['ai', 'AI', Sparkles], ['pen', 'Pen & paper', PenLine], ['integrations', 'Integrations', Plug], ['import', 'Import', Upload], ['tokens', 'Apps & tokens', KeyRound], ['admin', 'Administration', Shield]];
+const SECTIONS = [['profile', 'Profile', User], ['spaces', 'Spaces & sharing', Layers], ['ai', 'AI', Sparkles], ['pen', 'Pen & paper', PenLine], ['offline', 'Offline', CloudOff], ['integrations', 'Integrations', Plug], ['import', 'Import', Upload], ['tokens', 'Apps & tokens', KeyRound], ['admin', 'Administration', Shield]];
 
 export function SettingsPage({ section }) {
   const user = useStore((s) => s.user);
@@ -24,6 +25,7 @@ export function SettingsPage({ section }) {
         {cur === 'spaces' && <Spaces />}
         {cur === 'ai' && <AiSettings />}
         {cur === 'pen' && <PenSettings />}
+        {cur === 'offline' && <OfflineSettings />}
         {cur === 'integrations' && <Integrations />}
         {cur === 'import' && <Import />}
         {cur === 'tokens' && <Tokens />}
@@ -368,6 +370,45 @@ function AiSettings() {
       </div>
       {reasons.length > 0 && <h4>Why it failed</h4>}
       {reasons.slice(0, 5).map(([text, n]) => <p key={text} className="error small">{text}{n > 1 ? ` (${n} times)` : ''}</p>)}
+    </>
+  );
+}
+
+// What this device keeps for working without the server (per device: a phone may keep less than a laptop).
+function OfflineSettings() {
+  const [p, setP] = useState(offlinePolicy);
+  const spaces = useStore((s) => s.spaces);
+  useStore((s) => s.trees);
+  const progress = useStore((s) => s.offlineProgress);
+  const online = useStore((s) => s.online);
+  const [waiting, setWaiting] = useState(pendingCount());
+  const [usage, setUsage] = useState(null);
+  useEffect(() => onOutbox(setWaiting), []);
+  useEffect(() => { navigator.storage?.estimate?.().then((e) => setUsage(e.usage)).catch(() => {}); }, [progress]);
+  const change = (patchObj) => { const next = { ...p, ...patchObj }; setP(next); setOfflinePolicy(next); };
+  const count = wantedPages(p).length;
+  const mb = (b) => (b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1e6))} MB`);
+  const chosen = p.spaces || spaces.map((s) => s.id);
+  return (
+    <>
+      <h2>Offline</h2>
+      <p className="muted">Pages kept on this device open and can be changed without the server. New pages and changes are sent when it can be reached again.</p>
+      <Field label="Keep on this device">
+        <div className="seg wrap">{[['opened', 'Pages I open'], ['recent', 'Most recent'], ['days', 'Changed in a period'], ['all', 'All pages']].map(([v, l]) => <button key={v} className={p.mode === v ? 'on' : ''} onClick={() => change({ mode: v })}>{l}</button>)}</div>
+      </Field>
+      {p.mode === 'recent' && <Field label="How many"><div className="seg">{[50, 100, 300, 1000].map((n) => <button key={n} className={p.count === n ? 'on' : ''} onClick={() => change({ count: n })}>{n} pages</button>)}</div></Field>}
+      {p.mode === 'days' && <Field label="Changed in the last"><div className="seg wrap">{[[7, 'week'], [30, 'month'], [90, '3 months'], [365, 'year']].map(([d, l]) => <button key={d} className={p.days === d ? 'on' : ''} onClick={() => change({ days: d })}>{l}</button>)}</div></Field>}
+      {p.mode !== 'opened' && spaces.length > 1 && (
+        <div className="field"><span className="label">From these spaces</span>
+          <div>{spaces.map((s) => <label key={s.id} className="check"><input type="checkbox" checked={chosen.includes(s.id)}
+            onChange={(e) => { const next = e.target.checked ? [...chosen, s.id] : chosen.filter((x) => x !== s.id); change({ spaces: next.length === spaces.length ? null : next }); }} /> {s.icon} {s.name}</label>)}</div>
+        </div>
+      )}
+      <p className="hint">{p.mode === 'opened' ? 'Only pages opened here' : `${count} page${count === 1 ? '' : 's'}`}, plus favourites and pages opened here in the last week.{usage != null && ` Inkwell uses ${mb(usage)} on this device.`}</p>
+      <div className="row">
+        <button onClick={() => keepOffline().catch(toastError)} disabled={!online || !!progress}><RefreshCw size={15} /> {progress ? `Keeping… ${progress.done} of ${progress.total}` : 'Update now'}</button>
+        {waiting > 0 && <span className="muted">{waiting} change{waiting === 1 ? '' : 's'} waiting for the server</span>}
+      </div>
     </>
   );
 }

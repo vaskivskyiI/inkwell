@@ -38,7 +38,7 @@ async function positionFor(spaceId, parentId, afterId) {
   return b?.p == null ? a.position + 1 : (a.position + b.p) / 2;
 }
 
-export async function createNote(userId, { spaceId, parentId = null, afterId, kind = 'page', title = '', icon = '', markdown = '', blocks, journalDate = null, paper }) {
+export async function createNote(userId, { spaceId, parentId = null, afterId, kind = 'page', title = '', icon = '', markdown = '', blocks, journalDate = null, paper, id = null }) {
   if (parentId) {
     const p = await one('SELECT space_id FROM notes WHERE id = $1 AND deleted_at IS NULL', parentId);
     if (!p || p.space_id !== spaceId) fail(400, 'The parent page is not in this space');
@@ -46,10 +46,10 @@ export async function createNote(userId, { spaceId, parentId = null, afterId, ki
   const b = blocks || (markdown ? markdownToBlocks(markdown) : []);
   const doc = buildDoc({ title, blocks: b, paper: kind === 'journal' ? paper || 'ruled' : undefined });
   const info = extract(doc);
-  const n = await one(`INSERT INTO notes (space_id, parent_id, position, kind, title, icon, text_content, tags, journal_date, ydoc, content_hash, search, created_by, updated_by, created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, '', setweight(to_tsvector('simple', $5), 'A') || setweight(to_tsvector('simple', $7), 'B'), $11, $11, $12, $12) RETURNING *`,
+  const n = await one(`INSERT INTO notes (id, space_id, parent_id, position, kind, title, icon, text_content, tags, journal_date, ydoc, content_hash, search, created_by, updated_by, created_at, updated_at)
+    VALUES (COALESCE($13::uuid, gen_random_uuid()), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, '', setweight(to_tsvector('simple', $5), 'A') || setweight(to_tsvector('simple', $7), 'B'), $11, $11, $12, $12) RETURNING *`,
   spaceId, parentId, await positionFor(spaceId, parentId, afterId), kind === 'journal' ? 'journal' : 'page', str(title, 300), str(icon, 8),
-  info.text, info.tags, journalDate, encode(doc), userId, now());
+  info.text, info.tags, journalDate, encode(doc), userId, now(), id);
   await syncAssetRefs(n.id, info.assets);
   publish(spaceId, 'note:created', { note: noteOut(n) });
   // Imported / templated content is analysed like typed content.
@@ -152,8 +152,15 @@ export default async function noteRoutes(app) {
       await q('UPDATE assets SET note_id = $2 WHERE id = $1', a.id, n.id);
       return noteOut(n);
     }
+    // A page made offline comes with the id the device gave it (its content syncs under that id). Sent again after
+    // a lost answer, the page is already there.
+    const id = isUuid(b.id) ? b.id : null;
+    if (id) {
+      const had = await one('SELECT * FROM notes WHERE id = $1', id);
+      if (had) { if (had.created_by !== req.user.id || had.space_id !== b.spaceId) fail(409, 'That page id is taken'); return noteOut(had); }
+    }
     const t = b.template && TEMPLATES[b.template];
-    const n = await createNote(req.user.id, {
+    const n = await createNote(req.user.id, { id,
       spaceId: b.spaceId, parentId: isUuid(b.parentId) ? b.parentId : null, afterId: b.afterId === null || isUuid(b.afterId) ? b.afterId : undefined,
       kind: b.kind, title: str(b.title, 300) || (t && b.kind !== 'journal' ? `${t.name} ${new Date().toISOString().slice(0, 10)}` : ''),
       icon: b.icon || t?.icon || '', markdown: t ? fillTemplate(t.md) : str(b.markdown, 2e6), paper: b.paper || (await getSettings(req.user.id)).paper,

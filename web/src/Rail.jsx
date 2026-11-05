@@ -4,6 +4,7 @@ import { embedUrl, openBeside } from './SidePane.jsx';
 import { get, post } from './api.js';
 import { store, useStore, navigate, localGet } from './store.js';
 import { switchSpace, loadSpaces, onEvent } from './data.js';
+import { forgetAll } from './offline.js';
 import { Menu } from './ui/Menu.jsx';
 import { setTheme } from './theme.js';
 import { installApp } from './pwa.js';
@@ -49,6 +50,7 @@ function Bell() {
 export async function signOut() {
   const { authState } = store.get();
   await post('/api/auth/logout');
+  await forgetAll(); // nothing of this account stays on the device
   location.href = authState?.halcyonLogin && authState.halcyonUrl
     ? `${authState.halcyonUrl}/api/sso/logout?return=${encodeURIComponent(`${location.origin}/?signedout=1`)}` : '/?signedout=1';
 }

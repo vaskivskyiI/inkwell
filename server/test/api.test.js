@@ -283,3 +283,15 @@ test('a page moves to a shared space with its sub-pages, files and into a chosen
   assert.equal((await ann.get(`/api/notes/${j1.id}`)).spaceId, team.id);
   assert.equal((await ann.post('/api/journal', { spaceId: team.id })).id, j2.id);
 });
+
+test('a page made offline keeps the id the device gave it; sending it again does not make a second one', async () => {
+  const sp = space(ann, 'Private').id;
+  const id = crypto.randomUUID();
+  const n = await ann.post('/api/notes', { id, spaceId: sp, kind: 'journal' });
+  assert.equal(n.id, id);
+  assert.equal(n.kind, 'journal');
+  assert.equal((await ann.post('/api/notes', { id, spaceId: sp, kind: 'journal' })).id, id);
+  assert.equal((await ann.get(`/api/spaces/${sp}/tree`)).notes.filter((x) => x.id === id).length, 1);
+  assert.equal(await bob.status('POST', '/api/notes', { id, spaceId: space(bob, 'Private').id }), 409, 'someone else cannot take it');
+  assert.notEqual((await ann.post('/api/notes', { id: 'not-a-uuid', spaceId: sp })).id, 'not-a-uuid');
+});

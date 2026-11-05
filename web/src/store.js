@@ -61,7 +61,12 @@ export function toast(text, { kind = 'info', duration = 3500, action } = {}) {
   setTimeout(dismiss, duration);
   return { dismiss };
 }
-export const toastError = (e) => toast(e?.message || String(e), { kind: 'error', duration: 6000 });
+// Without the server it is not the request's fault: said once, calmly.
+let saidOffline = 0;
+export const toastError = (e) => {
+  if (e?.network) { if (Date.now() - saidOffline > 20000) { saidOffline = Date.now(); toast('Offline: this needs the server. Your pages and changes are kept on this device.'); } return; }
+  toast(e?.message || String(e), { kind: 'error', duration: 6000 });
+};
 
 // ---- tree helpers
 export function setTree(spaceId, notes) { store.set((s) => ({ trees: { ...s.trees, [spaceId]: notes } })); }

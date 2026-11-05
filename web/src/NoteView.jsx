@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Star, MoreHorizontal, Sparkles, Link2, MessageSquare, History, Copy, Download, Globe, Trash2, FolderInput, ChevronRight, WifiOff, Eye, PenLine, FilePlus2, BookOpen, Maximize2, MoveHorizontal, MessagesSquare, FileCode2, Camera, Smartphone, Image as ImageIcon, Type, FileDown, Printer } from 'lucide-react';
 import { toggleFullscreen, toggleCanvasFullscreen, pageCanvas } from './ui/fullscreen.js';
 import { get, post, put, patch, del } from './api.js';
-import { store, useStore, findNote, openNote, navigate, toast, toastError, localSet } from './store.js';
+import { store, useStore, findNote, patchNote, openNote, navigate, toast, toastError, localSet } from './store.js';
 import { openDoc, onEvent, loadFavorites, forgetDoc, moveToSpace } from './data.js';
 import { PageEditor } from './editor/Editor.jsx';
 import { MarkdownSource } from './editor/MarkdownSource.jsx';
@@ -234,6 +234,8 @@ function TitleRow({ detail, setDetail, doc, readOnly }) {
   const inkTitle = detail.kind === 'journal' && !readOnly && (penTitle || !title.trim());
   const ref = useRef(null);
   useEffect(() => { if (ref.current) { ref.current.style.height = 'auto'; ref.current.style.height = `${ref.current.scrollHeight}px`; } }, [title]);
+  // The page lists follow at once (also offline; the server confirms it once it saved the page).
+  useEffect(() => { const n = findNote(detail.id); if (n && n.title !== title.trim()) patchNote({ id: detail.id, title: title.trim() }); }, [title]); // eslint-disable-line react-hooks/exhaustive-deps
   const setIcon = async (icon) => { setPicker(false); setDetail((d) => ({ ...d, icon })); await patch(`/api/notes/${detail.id}`, { icon }).catch(toastError); };
   const suggestion = detail.insight?.title && !title.trim() ? detail.insight.title : null;
   return (
