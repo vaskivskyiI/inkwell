@@ -27,7 +27,7 @@ Halcyon's MCP endpoint). Browser (PWA) plus thin native Windows and Android apps
 ## Commands
 ```bash
 npm install && npm run build && npm start      # :8080 (on this Windows box 8080 is reserved — use INKWELL_PORT=8090)
-npm test                                      # 93 tests, in-memory PGlite, mock AI, real WebSockets
+npm test                                      # 95 tests, in-memory PGlite, mock AI, real WebSockets
 npm run test:pg -w server                     # API + AI tests via the pg driver
 ./deploy/podman-pod.sh up [--with-ollama]
 dotnet publish windows/Inkwell/Inkwell.csproj -c Release -r win-x64 --self-contained false -o windows/Inkwell/bin/publish-x64

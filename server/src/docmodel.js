@@ -2,10 +2,11 @@
 //   title   Y.Text        — page title
 //   default Y.XmlFragment — rich-text body as y-prosemirror writes it (elements named by node type, marks as text attributes)
 //   ink     Y.Map         — canvasId → Y.Array of strokes { id, t: 'pen'|'hl', c, w, p: [x, y, pressure, …], by }
-//   boxes   Y.Map         — journal text boxes: boxId → Y.Map { x, y, w, text: Y.Text }
+//   boxes   Y.Map         — text boxes on paper: boxId → Y.Map { x, y, w, text: Y.Text, canvas? } (no canvas: the journal's page)
 //   meta    Y.Map         — paper style etc.
 import * as Y from 'yjs';
-import { sha256 } from './util/crypto.js';
+import { sha256, randomToken } from './util/crypto.js';
+import { bounds } from './ink/geometry.js';
 
 export const docFrom = (bytes) => {
   const d = new Y.Doc();
@@ -270,6 +271,47 @@ export function buildDoc({ title = '', blocks = [], paper } = {}) {
   if (blocks.length) appendBlocks(d, blocks);
   if (paper) d.getMap('meta').set('paper', paper);
   return d;
+}
+
+// ---- a page becomes handwritten or typed. Nothing is lost: the typed body stays under a journal's paper, and a
+// journal's paper (ink, pictures, text boxes) becomes a drawing block at the top of the typed page.
+const onCanvas = (m, id) => m instanceof Y.Map && (m.get('canvas') || 'page') === id;
+
+/** Typed → handwritten: ink written over the text moves onto the paper. */
+export function toHandwritten(ydoc, { paper = 'ruled' } = {}) {
+  ydoc.transact(() => {
+    const meta = ydoc.getMap('meta'), ink = ydoc.getMap('ink');
+    if (!meta.get('paper')) meta.set('paper', paper);
+    const over = strokesOf(ydoc, 'overlay');
+    if (over.length) {
+      let page = ink.get('page');
+      if (!(page instanceof Y.Array)) { page = new Y.Array(); ink.set('page', page); }
+      page.push(over.map(({ a, ...st }) => st)); // eslint-disable-line no-unused-vars
+      const b = bounds(over);
+      if (b) meta.set('height', Math.max(meta.get('height') || 1400, Math.ceil((b.maxY + 600) / 100) * 100));
+    }
+    ink.delete('overlay');
+  }, 'convert');
+}
+
+/** Handwritten → typed: the paper becomes a drawing block (same paper, all its ink, pictures and text boxes) on top. */
+export function toTyped(ydoc) {
+  ydoc.transact(() => {
+    const ink = ydoc.getMap('ink'), meta = ydoc.getMap('meta');
+    const strokes = strokesOf(ydoc, 'page');
+    const imgs = [...ydoc.getMap('images').values()].filter((m) => onCanvas(m, 'page'));
+    const boxes = [...ydoc.getMap('boxes').values()].filter((m) => onCanvas(m, 'page'));
+    ink.delete('page');
+    if (!strokes.length && !imgs.length && !boxes.length) return;
+    const id = randomToken(6);
+    const a = new Y.Array();
+    a.push(strokes);
+    ink.set(id, a);
+    for (const m of [...imgs, ...boxes]) m.set('canvas', id);
+    const bottom = Math.max(bounds(strokes)?.maxY || 0, ...imgs.map((m) => (m.get('y') || 0) + (m.get('w') || 0) * (m.get('ratio') || 0.75)), ...boxes.map((m) => (m.get('y') || 0) + 120));
+    const frag = ydoc.getXmlFragment('default');
+    frag.insert(0, [toY({ type: 'inkBlock', attrs: { id, height: Math.max(240, Math.ceil((bottom + 60) / 10) * 10), paper: meta.get('paper') || 'plain' } })]);
+  }, 'convert');
 }
 
 /** Pictures of a canvas as SVG, cropped and rotated as on screen, plus how far down they reach. */

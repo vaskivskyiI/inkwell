@@ -13,7 +13,9 @@ import { addCanvasImage, placeCanvasImage } from './CanvasImages.jsx';
 import { useDrops } from '../capture.js';
 import { store, toast, toastError, useStore, openNote } from '../store.js';
 
-const PAPERS = [['ruled', 'Ruled'], ['grid', 'Grid'], ['dotted', 'Dotted'], ['plain', 'Plain']];
+export const PAPERS = [['ruled', 'Ruled'], ['grid', 'Grid'], ['dotted', 'Dotted'], ['plain', 'Plain']];
+// Text boxes belong to a canvas: none named is the journal's page (drawing blocks in typed pages name theirs).
+export const boxesOf = (boxes, canvasId) => [...boxes.entries()].filter(([, m]) => (m.get('canvas') || 'page') === canvasId);
 
 export function JournalView({ note, doc, readOnly }) {
   const meta = doc.getMap('meta');
@@ -89,10 +91,10 @@ export function JournalView({ note, doc, readOnly }) {
       <div className={`journal-body${showText ? ' split' : ''}`}>
       <div className="journal-paper">
         <InkCanvas ref={canvas} doc={doc} canvasId="page" height={height} minHeight={1400} autoGrow onHeightChange={grow} readOnly={readOnly} paper={paper} images onStrokesChange={onStrokes}
-          contentBottom={() => Math.max(0, ...[...boxes.values()].map((m) => (m.get('y') || 0) + 120))}
-          onTap={readOnly ? undefined : addBox} onSpace={(y0, dy) => doc.transact(() => { for (const m of boxes.values()) if (m.get('y') >= y0) m.set('y', Math.max(0, m.get('y') + dy)); })}>
+          contentBottom={() => Math.max(0, ...boxesOf(boxes, 'page').map(([, m]) => (m.get('y') || 0) + 120))}
+          onTap={readOnly ? undefined : addBox} onSpace={(y0, dy) => doc.transact(() => { for (const [, m] of boxesOf(boxes, 'page')) if (m.get('y') >= y0) m.set('y', Math.max(0, m.get('y') + dy)); })}>
           {(scale) => <>
-            {[...boxes.entries()].map(([id, m]) => <TextBox key={id} id={id} map={m} scale={scale} readOnly={readOnly} onDelete={() => boxes.delete(id)} />)}
+            {boxesOf(boxes, 'page').map(([id, m]) => <TextBox key={id} id={id} map={m} scale={scale} readOnly={readOnly} onDelete={() => boxes.delete(id)} />)}
             {showMarks && <Marks items={items} scale={scale} doc={doc} readOnly={readOnly}
               onSelect={(it) => canvas.current?.select(it.kind === 'heading' ? sectionIds(strokesNow.current, items, it) : it.ids)}
               onSpace={(e, y) => canvas.current?.startSpace(e, y)} />}
@@ -115,7 +117,7 @@ const TIP = {
 
 // What the page's structure looks like, in the left margin: headings, to-dos (tick them here), dividers (drag them
 // to make room), list items, boxed, circled and highlighted parts.
-function Marks({ items, scale, doc, readOnly, onSelect, onSpace }) {
+export function Marks({ items, scale, doc, readOnly, onSelect, onSpace }) {
   const ticks = doc.getMap('ticks');
   useYObserve(ticks);
   const used = [];
@@ -164,7 +166,7 @@ function RecognizedText({ rec, note, onRead, readOnly }) {
   );
 }
 
-function TextBox({ id, map, scale, readOnly, onDelete }) {
+export function TextBox({ id, map, scale, readOnly, onDelete }) {
   useYObserve(map);
   const ytext = map.get('text');
   useYObserve(ytext);

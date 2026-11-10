@@ -173,6 +173,15 @@ function NoteHeader({ detail, setDetail, handle, readOnly, wide }) {
     { label: 'Add sub-page', icon: FilePlus2, onClick: () => child('page'), hidden: readOnly },
     { label: 'Add sub-journal (handwriting)', icon: BookOpen, onClick: () => child('journal'), hidden: readOnly },
     { label: 'Duplicate', icon: Copy, onClick: async () => openNote((await post(`/api/notes/${detail.id}/duplicate`)).id), hidden: readOnly },
+    // Typed ↔ handwritten: the typed text stays under the paper; the paper becomes a drawing block at the top.
+    { label: detail.kind === 'journal' ? 'Make it a typed page' : 'Make it handwritten', icon: detail.kind === 'journal' ? Type : PenLine, hidden: readOnly, onClick: async () => {
+      const kind = detail.kind === 'journal' ? 'page' : 'journal';
+      const n = await patch(`/api/notes/${detail.id}`, { kind });
+      setDetail((d) => ({ ...d, kind: n.kind }));
+      patchNote({ id: detail.id, kind: n.kind });
+      if (kind === 'journal') store.set({ penLayer: false });
+      toast(kind === 'journal' ? 'Now a handwritten page: the typed text is under the paper' : 'Now a typed page: the handwriting is a drawing at the top');
+    } },
     { label: 'Move to space…', icon: FolderInput, hidden: readOnly, submenu: spaces.filter((s) => s.id !== detail.spaceId && ['owner', 'editor'].includes(s.role)).map((s) => ({ label: `${s.icon} ${s.name}`, onClick: () => moveToSpace(detail.id, s).then((moved) => { if (moved) store.set({ spaceId: s.id }); }).catch(toastError) })) },
     { label: 'Export as Markdown', icon: Download, onClick: () => { location.href = `/api/notes/${detail.id}/export`; } },
     { label: 'Export as HTML', icon: Download, onClick: () => { location.href = `/api/notes/${detail.id}/export?format=html`; } },

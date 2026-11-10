@@ -199,3 +199,50 @@ test('a new page left empty is discarded; written, titled, older, others\' or wi
   assert.equal((await discard(bob, annsBlank.id)).deleted, false);
   assert.equal(await exists(annsBlank.id), true);
 });
+
+test('a typed page becomes handwritten and back, keeping its ink, pictures and text boxes', async () => {
+  const { withDoc } = await import('../src/collab.js');
+  const Y = await import('yjs');
+  const sid = space(ann, 'Work').id;
+  const n = await ann.post('/api/notes', { spaceId: sid, title: 'Convert me', markdown: 'Typed text here' });
+  const stroke = (y) => ({ id: `s${y}`, t: 'pen', c: '#000', w: 2, p: [20, y, 0.5, 300, y + 5, 0.5] });
+  await withDoc(n.id, (d) => { const a = new Y.Array(); a.push([{ ...stroke(100), a: { b: 0, o: 3 } }]); d.getMap('ink').set('overlay', a); });
+  assert.equal((await ann.patch(`/api/notes/${n.id}`, { kind: 'journal' })).kind, 'journal');
+  let ink, paper, md;
+  const read = () => withDoc(n.id, (d) => { ink = Object.fromEntries([...d.getMap('ink').entries()].map(([k, v]) => [k, v.toArray()])); paper = d.getMap('meta').get('paper'); });
+  await read();
+  assert.deepEqual(Object.keys(ink), ['page'], 'ink over the text moved onto the paper');
+  assert.equal(ink.page[0].a, undefined);
+  assert.ok(paper);
+  md = await ann.get(`/api/notes/${n.id}/export`);
+  assert.match(md, /Typed text here/, 'the typed text stays (under the paper)');
+
+  await withDoc(n.id, (d) => { const m = new Y.Map(); m.set('x', 10); m.set('y', 400); m.set('w', 300); m.set('text', new Y.Text('A box')); d.getMap('boxes').set('b1', m); });
+  assert.equal((await ann.patch(`/api/notes/${n.id}`, { kind: 'page' })).kind, 'page');
+  let block, box;
+  await withDoc(n.id, (d) => {
+    const first = d.getXmlFragment('default').get(0);
+    block = { type: first.nodeName, id: first.getAttribute('id'), height: first.getAttribute('height'), paper: first.getAttribute('paper') };
+    box = d.getMap('boxes').get('b1').get('canvas');
+    ink = Object.fromEntries([...d.getMap('ink').entries()].map(([k, v]) => [k, v.toArray().length]));
+  });
+  assert.equal(block.type, 'inkBlock');
+  assert.deepEqual(ink, { [block.id]: 1 }, 'the paper became a drawing block with its ink');
+  assert.equal(box, block.id, 'and its text boxes');
+  assert.ok(block.height >= 520, String(block.height));
+  assert.equal(block.paper, paper);
+});
+
+test('notes for an event can start handwritten: paper with the details in a text box', async () => {
+  const { withDoc } = await import('../src/collab.js');
+  const n = await ann.post('/api/notes/from-item', { kind: 'event', ref: 'hw-1', title: 'Design review', hand: true, meta: { start: '2026-11-10T09:00:00Z', location: 'Room 4', attendees: 'Ann, Bob' } });
+  assert.equal(n.kind, 'journal');
+  let text;
+  await withDoc(n.id, (d) => { text = [...d.getMap('boxes').values()].map((m) => m.get('text').toString()).join(); });
+  assert.match(text, /Where: Room 4/);
+  assert.match(text, /Attendees: Ann, Bob/);
+  await ann.put('/api/settings', { itemNotes: 'journal' });
+  assert.equal((await ann.post('/api/notes/from-item', { kind: 'task', ref: 'hw-2', title: 'Write report' })).kind, 'journal', 'the setting decides when not asked');
+  assert.equal((await ann.post('/api/notes/from-item', { kind: 'task', ref: 'hw-3', title: 'Other', hand: false })).kind, 'page');
+  await ann.put('/api/settings', { itemNotes: 'page' });
+});

@@ -6,6 +6,9 @@ import { needNote, needSpace, userSpaceIds } from './spaces.js';
 import { publish } from './events.js';
 import { connections, scopesFor, spaceForConnection, tryEach, openUrl, eventsOn, call, byConn } from './integrations/halcyon.js';
 import { createNote, noteOut } from './notes.js';
+import { withDoc } from './collab.js';
+import { getSettings } from './settings.js';
+import * as Y from 'yjs';
 import { docFrom, extract, markdownToBlocks } from './docmodel.js';
 import { TEMPLATES } from './templates.js';
 import { config } from './config.js';
@@ -80,6 +83,7 @@ export async function noteFromItem(userId, b) {
   const attendees = Array.isArray(meta.attendees) ? meta.attendees : String(meta.attendees || '').split(',').map((s) => s.trim()).filter(Boolean);
   const extra = [];
   let md, icon, noteTitle = title;
+  let lastOpen = []; // to-dos still open in the previous note of this meeting
   if (kind === 'event') {
     icon = '🗓️';
     meta.attendees = attendees;
@@ -93,6 +97,7 @@ export async function noteFromItem(userId, b) {
       extra.push({ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'From last time' }] },
         { type: 'paragraph', content: [{ type: 'pageMention', attrs: { id: prev.id, title: prev.title } }] });
       if (open.length) extra.push(...markdownToBlocks(open.map((t) => `- [ ] ${t}`).join('\n')));
+      lastOpen = open;
       meta.previous = prev.id;
     }
   } else if (kind === 'email') {
@@ -102,7 +107,25 @@ export async function noteFromItem(userId, b) {
     icon = '☑️';
     md = `${meta.due ? `**Due:** ${stamp(meta.due).slice(0, 10)}\n\n` : ''}## Notes\n\n\n## Steps\n- [ ] `;
   }
-  const n = await createNote(userId, { spaceId, parentId: isUuid(b.parentId) ? b.parentId : null, title: noteTitle || (kind === 'email' ? 'E-mail notes' : 'Task notes'), icon, blocks: [...markdownToBlocks(md), ...extra] });
+  const settings = await getSettings(userId);
+  // Handwritten (asked for, or the user's choice in Settings → Pen & paper): paper to write on, with the details in a
+  // text box at the top instead of the typed template.
+  const hand = b.hand !== undefined ? b.hand === true || b.hand === '1' || b.hand === 1 : settings.itemNotes === 'journal';
+  const noteName = noteTitle || (kind === 'email' ? 'E-mail notes' : 'Task notes');
+  const n = hand
+    ? await createNote(userId, { spaceId, parentId: isUuid(b.parentId) ? b.parentId : null, kind: 'journal', title: noteName, icon, paper: settings.paper })
+    : await createNote(userId, { spaceId, parentId: isUuid(b.parentId) ? b.parentId : null, title: noteName, icon, blocks: [...markdownToBlocks(md), ...extra] });
+  if (hand) {
+    const lines = kind === 'event' ? [`${stamp(meta.start)}`, meta.location && `Where: ${meta.location}`, attendees.length && `Attendees: ${attendees.join(', ')}`]
+      : kind === 'email' ? [meta.from && `From: ${meta.from}`, `Date: ${stamp(meta.date)}`, meta.summary] : [meta.due && `Due: ${stamp(meta.due).slice(0, 10)}`];
+    if (lastOpen.length) lines.push('', 'Open from last time:', ...lastOpen.map((t) => `☐ ${t}`));
+    const text = lines.filter((l) => typeof l === 'string').join('\n').trim();
+    if (text) await withDoc(n.id, (doc) => {
+      const m = new Y.Map();
+      m.set('x', 40); m.set('y', 30); m.set('w', 620); m.set('text', new Y.Text(text));
+      doc.getMap('boxes').set(`item-${n.id.slice(0, 8)}`, m);
+    });
+  }
   await addLink(userId, n.id, { kind, ref, title, meta });
   if (meta.previous) await addLink(userId, n.id, { kind: 'note', ref: meta.previous, title: 'Previous meeting' });
   return noteOut(n);

@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS = {
   paper: 'ruled',          // default journal paper: ruled | grid | dotted | plain
   penOnly: 'auto',         // auto | on | off — when on, touch scrolls and only a pen draws
   journalSpace: '',
+  itemNotes: 'page',       // page | journal — notes for an event, e-mail or task start typed or handwritten
   aiTags: 'apply',         // apply | suggest — tags the AI finds are added to the page, or only offered        // space for daily journal pages (default: the first space the user owns)
 };
 

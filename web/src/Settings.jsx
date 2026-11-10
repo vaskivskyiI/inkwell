@@ -426,6 +426,9 @@ function PenSettings() {
       <Field label="Drawing on this device" hint="Only the pen draws: fingers and the mouse move and zoom the paper (two fingers zoom). The ✋ button in the pen toolbar switches this too.">
         <div className="seg">{[[false, 'Pen only'], [true, 'Finger and mouse draw too']].map(([v, l]) => <button key={String(v)} className={!!inkTool.finger === v ? 'on' : ''} onClick={() => setInkTool({ finger: v })}>{l}</button>)}</div>
       </Field>
+      <Field label="Notes for events, e-mails and tasks" hint="Handwritten: paper to write on, with the meeting's details in a text box at the top. Either can be changed later (page menu).">
+        <div className="seg">{[['page', 'Typed'], ['journal', 'Handwritten']].map(([v, l]) => <button key={v} className={(settings.itemNotes || 'page') === v ? 'on' : ''} onClick={() => saveSettings({ itemNotes: v })}>{l}</button>)}</div>
+      </Field>
       <h3>Shortcuts on a canvas</h3>
       <p className="hint">P pen · H highlighter · E eraser · L lasso (select, drag to move, Delete) · S insert space (drag down for room, up to close a gap) · T text box (journal) · Ctrl+Z / Ctrl+Y undo/redo. The pen's eraser end and barrel button erase.</p>
     </>

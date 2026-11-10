@@ -6,7 +6,7 @@ import { fail, str, isUuid } from './util/http.js';
 import { randomToken } from './util/crypto.js';
 import { needSpace, needNote, userSpaceIds } from './spaces.js';
 import { publish } from './events.js';
-import { buildDoc, encode, docFrom, markdownToBlocks, appendBlocks, setTitle, extract, editableMarkdown, replaceBody } from './docmodel.js';
+import { buildDoc, encode, docFrom, markdownToBlocks, appendBlocks, setTitle, extract, editableMarkdown, replaceBody, toHandwritten, toTyped } from './docmodel.js';
 import { sha256 } from './util/crypto.js';
 import { pageHtml } from './html.js';
 import { TEMPLATES, WELCOME_MD } from './templates.js';
@@ -182,6 +182,12 @@ export default async function noteRoutes(app) {
       await withDoc(n.id, (doc) => setTitle(doc, title, 'rest'), req.user);
     }
     if (b.paper !== undefined && ['ruled', 'grid', 'dotted', 'plain'].includes(b.paper)) await withDoc(n.id, (doc) => doc.getMap('meta').set('paper', b.paper), req.user);
+    // Typed ↔ handwritten (the content moves along: see toHandwritten / toTyped).
+    if (['page', 'journal'].includes(b.kind) && b.kind !== n.kind) {
+      const paper = (await getSettings(req.user.id)).paper;
+      await withDoc(n.id, (doc) => (b.kind === 'journal' ? toHandwritten(doc, { paper }) : toTyped(doc)), req.user);
+      await q('UPDATE notes SET kind = $2 WHERE id = $1', n.id, b.kind);
+    }
     if (b.spaceId !== undefined && b.spaceId !== n.space_id) {
       await needNote(req.user.id, n.id, 'editor');
       await needSpace(req.user.id, b.spaceId, 'editor');

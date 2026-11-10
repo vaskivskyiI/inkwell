@@ -55,8 +55,8 @@ export function HomePage() {
 
 // Opens (or creates) the note for a Halcyon item. Item → note via a link like
 // #/new?kind=event&ref=42&title=…&start=…&location=…&attendees=… (Halcyon's "New note in Inkwell", or Today below).
-export async function noteForItem(kind, ref, title, meta = {}) {
-  const n = await post('/api/notes/from-item', { kind, ref: String(ref), title, meta, spaceId: currentSpace()?.id });
+export async function noteForItem(kind, ref, title, meta = {}, hand) {
+  const n = await post('/api/notes/from-item', { kind, ref: String(ref), title, meta, spaceId: currentSpace()?.id, hand });
   if (n.existing) toast('Opened the existing note');
   return n;
 }
@@ -168,13 +168,13 @@ export function ReviewPage() {
 export function NewFromItem({ query }) {
   const [error, setError] = useState(null);
   useEffect(() => {
-    const { kind, ref, title, space, do: action, ...rest } = query;
+    const { kind, ref, title, space, do: action, hand, ...rest } = query;
     const meta = Object.fromEntries(Object.entries(rest).filter(([, v]) => v));
     const d = new Date(), today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const made = action === 'today' ? post('/api/journal', { date: today })
       : action === 'hand' ? post('/api/notes', { spaceId: space || currentSpace()?.id, kind: 'journal' }).then((n) => { markFresh(n.id); store.set({ penStart: n.id }); return n; })
       : action === 'page' || action === 'meeting' ? post('/api/notes', { spaceId: space || currentSpace()?.id, kind: 'page', template: action === 'meeting' ? 'meeting' : undefined })
-        : post('/api/notes/from-item', { kind, ref, title, meta, spaceId: space || currentSpace()?.id });
+        : post('/api/notes/from-item', { kind, ref, title, meta, spaceId: space || currentSpace()?.id, hand: hand === undefined ? undefined : hand === '1' }).then((n) => { if (n.kind === 'journal' && !n.existing) store.set({ penStart: n.id }); return n; });
     made.then((n) => location.replace(`#/n/${n.id}`)) // replace: Back returns to where the user came from, not here
       .catch(setError);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -261,11 +261,11 @@ function Today({ highlight }) {
     load('tasks', `/api/halcyon/tasks${sp}`, 'task');
     load('mail', `/api/halcyon/open-items${sp}`, 'email');
   }, []);
-  const open = async (it) => {
+  const open = async (it, hand) => {
     const id = notes[`${it.kind}:${it.ref}`];
     if (id) { openNote(id); return; }
     const meta = it.kind === 'event' ? { ...it.meta, day: it.meta.allDay ? it.meta.start.slice(0, 10) : localDay(new Date(it.meta.start)) } : it.meta;
-    try { openNote((await noteForItem(it.kind, it.ref, it.title, meta)).id); } catch (e) { toastError(e); }
+    try { const n = await noteForItem(it.kind, it.ref, it.title, meta, hand); if (n.kind === 'journal' && !n.existing) store.set({ penStart: n.id }); openNote(n.id); } catch (e) { toastError(e); }
   };
   const row = (it, when, late, sub) => (
     <div key={`${it.kind}:${it.ref}`} className="today-item">
@@ -273,7 +273,8 @@ function Today({ highlight }) {
       <span className="grow"><b>{it.title}</b>{(sub || it.meta.source) && <span className="sub">{[it.meta.source, sub].filter(Boolean).join(' · ')}</span>}</span>
       <a className="ext" href={it.openUrl} title="Open in Halcyon"><ExternalLink size={14} /></a>
       <a className="ext" href={`#/link?${itemQuery(it.kind, it.ref, it.title, it.kind === 'event' ? { ...it.meta, day: it.meta.allDay ? it.meta.start.slice(0, 10) : localDay(new Date(it.meta.start)) } : it.meta)}`} title="Link to a page you already have"><Link2 size={14} /></a>
-      <button onClick={() => open(it)}>{notes[`${it.kind}:${it.ref}`] ? <><NotebookText size={14} /> Open note</> : <><FilePlus2 size={14} /> Note</>}</button>
+      {!notes[`${it.kind}:${it.ref}`] && <button className="icon" onClick={() => open(it, true)} title="Handwritten note" aria-label="Handwritten note"><PenLine size={14} /></button>}
+      <button onClick={() => open(it, false)}>{notes[`${it.kind}:${it.ref}`] ? <><NotebookText size={14} /> Open note</> : <><FilePlus2 size={14} /> Note</>}</button>
     </div>
   );
   const list = (items, empty, render) => (items === null ? <span className="spinner" /> : !items.length ? <p className="muted">{empty}</p> : <div className="today-list">{items.map(render)}</div>);
