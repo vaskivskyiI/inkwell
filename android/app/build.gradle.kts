@@ -19,6 +19,8 @@ android {
         versionName = prop("inkwell.version") ?: "1.0.0"
         // Pre-filled on the first start (the build script's HOST), still changeable there.
         buildConfigField("String", "DEFAULT_SERVER", "\"${prop("inkwell.server") ?: ""}\"")
+        // Browser links to this host open the app (manifest); without a server none do (.invalid never resolves).
+        manifestPlaceholders["serverHost"] = prop("inkwell.server")?.let { java.net.URI(if ("://" in it) it else "https://$it").host } ?: "inkwell.invalid"
         resValue("string", "app_name", prop("inkwell.name") ?: "Inkwell")
     }
     signingConfigs {

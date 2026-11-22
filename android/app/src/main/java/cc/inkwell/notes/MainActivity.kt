@@ -139,6 +139,9 @@ class MainActivity : ComponentActivity() {
     private fun arrive(i: Intent?): String? {
         i ?: return null
         if (i.action == Intent.ACTION_SEND || i.action == Intent.ACTION_SEND_MULTIPLE) { receive(i); return null }
+        // A link to the server followed in a browser (a start page's tile): its #/ place; the bare address, another
+        // server's or no place just opens the app.
+        if (i.action == Intent.ACTION_VIEW) return i.data?.takeIf { ours(it) }?.encodedFragment?.takeIf { it.startsWith("/") }?.let { "#$it" }
         // Only places inside the web app: another app may start this activity too.
         return i.getStringExtra(EXTRA_ROUTE)?.takeIf { it.startsWith("#/") }
     }
