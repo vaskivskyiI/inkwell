@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
-HOST=${HOST:-}; PKG=${PKG:-cc.inkwell.notes}; APP_NAME=${APP_NAME:-Inkwell}; VERSION=${VERSION:-1.0.0}
+HOST=${HOST:-}; PKG=${PKG:-cc.inkwell.notes}; APP_NAME=${APP_NAME:-Inkwell}; VERSION=${VERSION:-0.1.1}
 KEYDIR=${KEYDIR:-$ROOT/../inkwell-android-signing}
 T=${T:-$HOME/android-build}
 GRADLE_VERSION=8.11.1

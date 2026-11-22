@@ -1,7 +1,7 @@
 {
   "name": "inkwell",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Self-hostable, AI-native notes: rich text and handwriting, real-time collaboration, shared spaces",
   "workspaces": ["server", "web"],
   "scripts": {

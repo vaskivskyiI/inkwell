@@ -15,7 +15,7 @@
     <Product>Inkwell</Product>
     <Company>Inkwell</Company>
     <Description>Inkwell for Windows</Description>
-    <Version>1.0.0</Version>
+    <Version>0.1.1</Version>
     <!-- Not invariant: WinForms reads the keyboard layout's culture (e.g. Ukrainian) when it changes. -->
     <InvariantGlobalization>false</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>

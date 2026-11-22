@@ -33,4 +33,4 @@ On Linux or WSL with JDK 17 and the Android SDK (platform 36, build-tools 36.1.0
 The signed APK lands in `dist-apps/Inkwell-<version>.apk`. The first build makes a signing key in
 `../inkwell-android-signing/` (next to the repository): keep that folder — every update of the installed app must be
 signed with the same key. Install by opening the APK on the device (allow installing from that source once), or
-`adb install -r dist-apps/Inkwell-1.0.0.apk`.
+`adb install -r dist-apps/Inkwell-0.1.1.apk`.
