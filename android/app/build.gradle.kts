@@ -1,3 +1,5 @@
+import java.net.URI
+
 // The Inkwell app: the server's web app in a WebView, plus what a web page cannot do well on Android — the share
 // sheet, launcher shortcuts, the camera for photos, printing to PDF, downloads and a private CA. Built by
 // android/build-local.sh (or .github/workflows/android.yml).
@@ -20,7 +22,7 @@ android {
         // Pre-filled on the first start (the build script's HOST), still changeable there.
         buildConfigField("String", "DEFAULT_SERVER", "\"${prop("inkwell.server") ?: ""}\"")
         // Browser links to this host open the app (manifest); without a server none do (.invalid never resolves).
-        manifestPlaceholders["serverHost"] = prop("inkwell.server")?.let { java.net.URI(if ("://" in it) it else "https://$it").host } ?: "inkwell.invalid"
+        manifestPlaceholders["serverHost"] = prop("inkwell.server")?.let { URI(if ("://" in it) it else "https://$it").host } ?: "inkwell.invalid"
         resValue("string", "app_name", prop("inkwell.name") ?: "Inkwell")
     }
     signingConfigs {
